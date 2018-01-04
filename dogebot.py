@@ -81,7 +81,7 @@ class BinanceBot:
 		order_price = float(self.current_order['price'])
 		# let's make sure this works before adding transactions
 		while(self.current_order['status'] not in "FILLED"): 
-			order = self.client.get_order(symbol=trade_pair, orderId=orderID)
+			self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
 			time.sleep(1)
 			
 		print("BUY!!! %s: qty: %d price: %f"%(trade_pair, qty, bid_price))
@@ -113,7 +113,7 @@ class BinanceBot:
 		order_price = float(self.current_order['price'])
 		# let's make sure this works before adding transactions
 		while(self.current_order['status'] not in "FILLED"): 
-			order = self.client.get_order(symbol=trade_pair, orderId=orderID)
+			self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
 			time.sleep(1)
 			# TODO: something about EXPIRED or CANCELLED status, for now it will hang
 			
