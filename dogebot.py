@@ -19,8 +19,8 @@ class BinanceBot:
 		self.ETHBTC_value = 0
 		self.ETHUSDT = 0
 		self.current_holding = 'ETH'
-		self.current_holding_qty = 2  # this is in the above
-		self.current_holding_value = 2  # this is in ETH
+		self.current_holding_qty = 1  # this is in the above
+		self.current_holding_value = 1  # this is in ETH
 		self.pairs_of_interest = [('REQ','ETH'), ('REQ','BTC'),
 								  ('LTC','ETH'), ('LTC','BTC'),
 								  ('NEO','ETH'), ('NEO','BTC'),
@@ -76,7 +76,7 @@ class BinanceBot:
 		else:
 			self.current_order = self.client.order_limit_buy(symbol=trade_pair,
 															 quantity=qty,
-															 price=str(bid_price))
+															 price=str(float(bid_price)))
 		orderID = self.current_order['orderId']
 		order_price = float(self.current_order['price'])
 		# let's make sure this works before adding transactions
@@ -106,9 +106,10 @@ class BinanceBot:
 		if ask_price is None: # market order
 			self.current_order = self.client.order_market_sell(symbol=trade_pair, quantity=qty)
 		else: # non-market order
+			print("{0}, type:{1}".format(str(float(ask_price)), type(str(float(ask_price)))))
 			self.current_order = self.client.order_limit_sell(symbol=trade_pair,
 															  quantity=qty,
-															  price=str(ask_price))
+															  price=str(float(ask_price)))
 		orderID = self.current_order['orderId']
 		order_price = float(self.current_order['price'])
 		# let's make sure this works before adding transactions
@@ -164,6 +165,27 @@ class BinanceBot:
 		pp.pprint(recent_trades['bids'][:10])
 		print('Asks (sell):')
 		pp.pprint(recent_trades['asks'][:10])
+		
+	def get_open_orders(self, sym=None):
+		"""
+		orders = {symbol: { 'bids':[
+							[str(highest_price), str(qty)],
+							[str(price--), str(qty)],...] 
+							'asks':[
+							[str(lowest_price), str(qty)],
+							[str(price++), str(qty)],...] 
+						   }
+				  }
+		"""
+		orders = {}
+		if sym:
+			orders[sym] = self.client.get_order_book(symbol='ETHBTC')
+		else:
+			for sym in self.list_of_pairs_of_interest:
+				orders[sym] = self.client.get_order_book(symbol=sym)
+		# self.pp.pprint(orders)
+		return orders
+			
 		
 class VolatilityBot(BinanceBot):
 	def __init__(self, api_key, api_secret):
@@ -225,10 +247,17 @@ class VolatilityBot(BinanceBot):
 		super().trade_sell(trade_pair, quantity, price)
 		
 	def day_trade(self):
+		last_best_trade = 'REQETH'
+		count = 0
 		while(1):
 			time.sleep(self.wait_time)
 			best_trade = self.check_value_delta()
-			if self.minimum_trade_value < self.sym_lot_size[best_trade]*float(self.current_values[best_trade]):
+			if best_trade in last_best_trade:
+				count += 1
+			else:
+				last_best_trade = best_trade
+				count = 0
+			if count >5 and self.minimum_trade_value < self.sym_lot_size[best_trade]*float(self.current_values[best_trade]):
 				min_trade_threshold = self.sym_lot_size[best_trade]*float(self.current_values[best_trade])
 			else:
 				min_trade_threshold = self.minimum_trade_value
@@ -274,3 +303,10 @@ if __name__ == '__main__':
 	dogebot.threshold()
 	dogebot.day_trade()
 	
+# IDEAS #
+"""
+[done]make sure a symbol is consistently low for several trade cycles before deciding to jump on it - maybe a counter?
+look at actual bids and choose one several spots away from the intersection to ensure a quick transition
+significantly penalize multiple trades for time
+consider converting back to eth/btc when trade pair price rises
+"""
