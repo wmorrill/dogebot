@@ -15,9 +15,10 @@ class BinanceBot:
 		self.api_key = api_key
 		self.client = Client(api_key, api_secret)
 		self.coins = {}
+		self.ETHUSD = 0
 		self.current_holding = 'ETH'
-		self.current_holding_qty = 1  # this is in the above
-		self.current_holding_value = 1  # this is in ETH
+		self.current_holding_qty = 2  # this is in the above
+		self.current_holding_value = 2  # this is in ETH
 		self.coins_of_interest = ['REQ', 'LTC', 'NEO', 'IOTA', 'XLM', 'NAV', 'FUN']
 		self.what_is_allowed()
 		self.coins['ETH'] = Coin(client=self.client, symbol='ETH')
@@ -59,6 +60,7 @@ class BinanceBot:
 		
 		# let's make sure this works before moving on
 		while(self.current_order['status'] not in "FILLED"): 
+			print("Waiting for order to fill...", end="\r")
 			self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
 			time.sleep(1)
 		
@@ -93,6 +95,7 @@ class BinanceBot:
 		
 		# let's make sure this works before adding transactions
 		while(self.current_order['status'] not in "FILLED"): 
+			print("Waiting for order to fill...", end="\r")
 			self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
 			time.sleep(1)
 			# TODO: something about EXPIRED or CANCELLED status, for now it will hang
@@ -166,7 +169,12 @@ class BinanceBot:
 		# self.pp.pprint(orders)
 		return orders
 			
-		
+	
+class MarketDepthBot(BinanceBot):
+	def __init__(self, api_key, api_secret):
+		super().__init__(api_key, api_secret)
+	
+	
 class VolatilityBot(BinanceBot):
 	def __init__(self, api_key, api_secret):
 		super().__init__(api_key, api_secret)
@@ -177,7 +185,7 @@ class VolatilityBot(BinanceBot):
 		self.trade_fee = 0.001  # 0.1% fee
 		self.total_fees = 0
 		self.max_trade_value = 2  # ETH
-		self.minimum_trade_value = self.current_holding_value * (2 * self.trade_fee) # this is in ETH
+		self.minimum_trade_value = 1.1 * self.current_holding_value * (2 * self.trade_fee) # this is in ETH
 				
 	def threshold(self, min_price_in_eth=None, time_between_trades=None):
 		if min_price_in_eth:
@@ -191,15 +199,16 @@ class VolatilityBot(BinanceBot):
 	def trade_buy(self, trade_pair, quantity, price=None):
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
 		print("Buy: %s x %f @ %s"%(trade_pair, quantity, str(price)))
-		#return super().trade_buy(trade_pair, quantity, price)
+		return super().trade_buy(trade_pair, quantity, price)
 		
 	def trade_sell(self, trade_pair, quantity, price=None):
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
 		print("Sell: %s x %f @ %s"%(trade_pair, quantity, str(price)))
-		#return super().trade_sell(trade_pair, quantity, price)
+		return super().trade_sell(trade_pair, quantity, price)
 		
 	def day_trade(self):
 		while(1):
+			self.ETHUSD = self.coin['ETH'].usd_value
 			# what are we holding?
 			current_coin = self.coins[self.current_holding]
 			# get conservative estimated value for each trade
@@ -383,7 +392,7 @@ class Coin:
 		for i in trades:
 			sum += i[1]
 			count += 1
-			if sum >= quantity*1.1:
+			if sum >= quantity*1.2:
 				# print("expect %d trades @ price: %f" %(count, i[0]))
 				return self.sterilize(self.pair(symbol), price=i[0])
 		return 
