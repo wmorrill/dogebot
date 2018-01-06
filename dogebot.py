@@ -20,10 +20,10 @@ class BinanceBot:
 		self.current_holding_value = 1  # this is in ETH
 		self.coins_of_interest = ['REQ', 'LTC', 'NEO', 'IOTA', 'XLM', 'NAV', 'FUN']
 		self.what_is_allowed()
-		self.coins['ETH'] = Coin(client, 'ETH')
-		self.coins['BTC'] = Coin(client, 'BTC')
+		self.coins['ETH'] = Coin(client=self.client, symbol='ETH')
+		self.coins['BTC'] = Coin(client=self.client, symbol='BTC')
 		for coin in self.coins_of_interest:
-			self.coins[coin] = Coin(client, coin)
+			self.coins[coin] = Coin(client=self.client, symbol=coin)
 			self.coins['ETH'].add_pair(coin)
 			self.coins['BTC'].add_pair(coin)
 			
@@ -56,12 +56,13 @@ class BinanceBot:
 															 quantity=qty,
 															 price=str(float(bid_price)))
 		orderID = self.current_order['orderId']
-		order_price = float(self.current_order['price'])
+		
 		# let's make sure this works before moving on
 		while(self.current_order['status'] not in "FILLED"): 
 			self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
 			time.sleep(1)
-			
+		
+		order_price = float(self.current_order['price'])		
 		print("BUY!!! %s: qty: %d price: %f"%(trade_pair, qty, order_price))
 		self.current_holding = trade_pair[:-3]
 		self.current_holding_qty = qty
@@ -78,7 +79,7 @@ class BinanceBot:
 						 self.current_holding_value*self.ETHUSDT]
 		self.document_transaction(documentation)
 		
-		return True
+		return order_price
 		
 	def trade_sell(self, trade_pair, qty, ask_price=None):
 		if ask_price is None: # market order
@@ -89,13 +90,14 @@ class BinanceBot:
 															  quantity=qty,
 															  price=str(float(ask_price)))
 		orderID = self.current_order['orderId']
-		order_price = float(self.current_order['price'])
+		
 		# let's make sure this works before adding transactions
 		while(self.current_order['status'] not in "FILLED"): 
 			self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
 			time.sleep(1)
 			# TODO: something about EXPIRED or CANCELLED status, for now it will hang
 			
+		order_price = float(self.current_order['price'])
 		print("SELL!!! %s: qty: %d price: %f"%(trade_pair, qty, ask_price))
 		if 'BTC' in trade_pair:
 			self.current_holding = 'BTC'
@@ -118,7 +120,7 @@ class BinanceBot:
 						 self.current_holding_value*self.ETHUSDT]
 		self.document_transaction(documentation)
 		
-		return True
+		return order_price
 		
 	def get_balance(self):
 		unique_coins = set(list(chain.from_iterable(self.pairs_of_interest)))
@@ -168,30 +170,15 @@ class BinanceBot:
 class VolatilityBot(BinanceBot):
 	def __init__(self, api_key, api_secret):
 		super().__init__(api_key, api_secret)
-		self.purchase_values = self.get_current_prices()
+		self.purchase_values = {}
 		self.current_values = {}
 		self.deltas = {}
 		self.wait_time = 1
 		self.trade_fee = 0.001  # 0.1% fee
 		self.total_fees = 0
+		self.max_trade_value = 2  # ETH
 		self.minimum_trade_value = self.current_holding_value * (2 * self.trade_fee) # this is in ETH
-		# there is probably a way to actually lookup the transaction fees instead of assuming
-
-	def check_value_delta(self):
-		old = self.purchase_values
-		self.current_values = self.get_current_prices()
-		self.current_values['ETHBTC'] = self.ETHBTC_value
-		new = self.current_values
-		# if we are holding something other than ETH, adjust our value
-		if 'ETH' not in self.current_holding:
-			if 'BTC' in self.current_holding:
-				self.current_holding_value = self.current_holding_qty*float(self.current_values['ETHBTC'])
-			else:
-				self.current_holding_value = self.current_holding_qty*float(self.current_values[self.current_holding+'ETH'])
-		for p in self.list_of_pairs_of_interest:
-			self.deltas[p] = (float(old[p])-float(new[p]))/float(old[p])
-		return max(self.deltas.keys(), key=(lambda k: self.deltas[k]))
-		
+				
 	def threshold(self, min_price_in_eth=None, time_between_trades=None):
 		if min_price_in_eth:
 			self.minimum_trade_value = min_price_in_eth
@@ -202,31 +189,60 @@ class VolatilityBot(BinanceBot):
 			print("Wait Time between price lookup (sec):%d"%self.wait_time)
 		
 	def trade_buy(self, trade_pair, quantity, price=None):
-		quantity = int(quantity/self.sym_lot_size[trade_pair])*self.sym_lot_size[trade_pair]
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
-		super().trade_buy(trade_pair, quantity, price)
+		print("Buy: %s x %f @ %s"%(trade_pair, quantity, str(price)))
+		#return super().trade_buy(trade_pair, quantity, price)
 		
 	def trade_sell(self, trade_pair, quantity, price=None):
-		quantity = int(quantity/self.sym_lot_size[trade_pair])*self.sym_lot_size[trade_pair]
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
-		super().trade_sell(trade_pair, quantity, price)
+		print("Sell: %s x %f @ %s"%(trade_pair, quantity, str(price)))
+		#return super().trade_sell(trade_pair, quantity, price)
 		
 	def day_trade(self):
-		# what are we holding?
-		current_coin = self.coins[self.current_holding]
-		# get conservative estimated value for each trade
-		for p in current_coin.pairs:
-			sym = current_coin.pair(p)
-			self.current_price[sym] = current_coin.price(p)
-			self.deltas[sym] = current_price[sym]-self.purchase_price[sym]
+		while(1):
+			# what are we holding?
+			current_coin = self.coins[self.current_holding]
+			# get conservative estimated value for each trade
+			for p in current_coin.pairs:
+				if p in "USDT":
+					continue
+				sym = current_coin.pair(p)
+				self.current_values[sym] = current_coin.price(p, self.current_holding_value)
+				if sym not in self.purchase_values.keys():
+					# print(sym, self.purchase_values.keys())
+					self.purchase_values[sym] = self.current_values[sym]
+				# print(sym, self.current_values[sym], self.purchase_values[sym])
+				try:
+					self.deltas[sym] = (self.current_values[sym]-self.purchase_values[sym])/self.purchase_values[sym]
+				except TypeError:
+					self.purchase_values[sym] = self.current_values[sym]
 			if not current_coin.is_base:
 				# check if this pair's value increased (then we should sell back to base pair)
-				if self.deltas['ETH']
-		# decide if that price is worthwhile to trade (if so we should buy)
-		return
+				best_trade = max(self.deltas.keys(), key=(lambda k: self.deltas[k]))
+				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
+				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance)
+				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f}".format(best_trade, 
+																		  self.deltas[best_trade]*self.current_holding_value,
+																		  min_trade_threshold), end="\r")
+				if self.deltas[best_trade]*self.current_holding_value > self.minimum_trade_value:
+					self.trade_sell(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
+			else:
+				# check if this has a pair that has decreased enough to be worth trading
+				best_trade = min(self.deltas.keys(), key=(lambda k: self.deltas[k]))
+				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
+				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
+				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f}".format(best_trade, 
+																		  abs(self.deltas[best_trade]*self.current_holding_value),
+																		  min_trade_threshold), end="\r")
+				if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
+					self.purchase_values[best_trade] = self.trade_buy(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
+			# decide if that price is worthwhile to trade (if so we should buy)
+			time.sleep(0.1)
 		
-class coin:
-	def __init__(client, symbol):
+		
+class Coin:
+	def __init__(self, client, symbol):
+		print("Adding Coin: %s"%symbol)
 		self.client = client
 		self.sym = symbol
 		self.eth_value = 0
@@ -252,7 +268,7 @@ class coin:
 		symbol_limits = api_limits['symbols']
 		possible_pairs = []
 		for x in symbol_limits:
-			if self.sym in x['symbol']:
+			if 'ETH' or 'BTC' in x['symbol']:
 				possible_pairs.append(x['symbol'])
 				self.increment[x['symbol']] = float(x['filters'][1]['stepSize'])
 				self.min_price[x['symbol']] = float(x['filters'][0]['minPrice'])
@@ -277,19 +293,24 @@ class coin:
 	def __str__():
 		return "{0:}: qty:{1:.6f} ETH value:{2:6f}".format(self.sym, self.balance, self.eth_value)
 		
-	def sterilize(self, qty=None, price=None):
-		if qty and qty > self.max_qty:
-			qty = self.max_qty
-		elif qty and qty < self.max_qty:
-			qty = self.max_qty
+	def sterilize(self, sym, qty=None, price=None):
+		if not sym:
+			print("Need to give a symbol pair to sterelize!!!")
+			return
+		# if qty and qty > self.max_qty:
+			# qty = self.max_qty
+		# elif qty and qty < self.min_qty:
+			# qty = self.min_qty
 			
-		if price and price > self.max_price:
-			price = self.max_price
-		elif price and price < self.max_price:
-			price = self.max_price
+		# if price and price > self.max_price:
+			# price = self.max_price
+		# elif price and price < self.min_price:
+			# price = self.min_price
+		if qty:
+			qty = float(int(qty/self.increment[sym])*self.increment[sym])
 			
 		if price:
-			price = float(self.increment*int(price/self.increment))
+			#price = float(int(price/self.increment)*self.increment)
 			if qty:
 				return (qty, price)
 			else:
@@ -315,9 +336,10 @@ class coin:
 		self.pairs.append(symbol)
 	
 	def update_balance(self):
-		self.balance = self.client.get_asset_balance(asset=self.sym)
+		self.balance = float(self.client.get_asset_balance(asset=self.sym)['free'])
 	
 	def update_books(self, symbol=None):
+		#print("updating books for %s"%symbol)
 		if symbol is None:
 			# let's update everything
 			update_list = self.pairs
@@ -325,22 +347,22 @@ class coin:
 			# lets just check that one to be efficient
 			update_list = [symbol,]
 		for antagonist in update_list:
-				self.books[antagonist] = self.client.get_order_book(symbol=self.pair(antagonist))[self.pair(antagonist)] 
+			self.books[antagonist] = self.client.get_order_book(symbol=self.pair(antagonist)) 
 
 	def update_value(self):
 		self.update_books()
 		self.update_balance()
 		if 'ETH' in self.sym: 
 			self.eth_value = self.balance
-			self.btc_value = self.balance * self.books['ETHBTC']['asks'][0]
-			self.usd_value = self.balance * self.books['ETHUSDT']['asks'][0]
+			self.btc_value = self.balance * float(self.books['BTC']['asks'][0][0])
+			self.usd_value = self.balance * float(self.books['USDT']['asks'][0][0])
 		elif 'BTC' in self.sym:
-			self.eth_value = self.balance / self.books['ETHBTC']['asks'][0]
+			self.eth_value = self.balance / float(self.books['ETH']['asks'][0][0])
 			self.btc_value = self.balance
-			self.usd_value = self.balance * self.books['BTCUSDT']['asks'][0]
+			self.usd_value = self.balance * float(self.books['USDT']['asks'][0][0])
 		else: # its an alt
-			self.eth_value = self.balance * self.books[self.pair('ETH')]['asks'][0]
-			self.btc_value = self.balance * self.books[self.pair('BTC')]['asks'][0]
+			self.eth_value = self.balance * float(self.books['ETH']['asks'][0][0])
+			self.btc_value = self.balance * float(self.books['BTC']['asks'][0][0])
 			self.usd_value = None
 			
 	def price(self, symbol, base_value):
@@ -349,16 +371,21 @@ class coin:
 		if self.is_base:
 			#then we want to buy
 			quantity = base_value
-			trades = [[float(x), float(y)] for [x, y, z] in self.books['asks']]
+			trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
 		else:
 			# then we want to sell
-			quantity = self.sterilize(qty=base_value/self.books[symbol]['asks'][0])
+			quantity = self.sterilize(self.pair(symbol), qty=base_value/self.books[symbol]['asks'][0])
 			trades = [[float(x), float(y)] for [x, y, z] in self.books['bids']]
 		sum = 0
+		count = 0
+		# print(symbol)
+		# print(trades)
 		for i in trades:
-			sum += trades[1]
+			sum += i[1]
+			count += 1
 			if sum >= quantity*1.1:
-				return sterlize(price=trades[0])
+				# print("expect %d trades @ price: %f" %(count, i[0]))
+				return self.sterilize(self.pair(symbol), price=i[0])
 		return 
 			
 
@@ -371,11 +398,3 @@ if __name__ == '__main__':
 	dogebot.threshold(time_between_trades = 1)
 	dogebot.threshold()
 	dogebot.day_trade()
-	
-# IDEAS #
-"""
-[done]make sure a symbol is consistently low for several trade cycles before deciding to jump on it - maybe a counter?
-look at actual bids and choose one several spots away from the intersection to ensure a quick transition
-significantly penalize multiple trades for time
-consider converting back to eth/btc when trade pair price rises
-"""
