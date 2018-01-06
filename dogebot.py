@@ -17,8 +17,8 @@ class BinanceBot:
 		self.coins = {}
 		self.ETHUSD = 0
 		self.current_holding = 'ETH'
-		self.current_holding_qty = 2  # this is in the above
-		self.current_holding_value = 2  # this is in ETH
+		self.current_holding_qty = 1  # this is in the above
+		self.current_holding_value = 1  # this is in ETH
 		self.coins_of_interest = ['REQ', 'LTC', 'NEO', 'IOTA', 'XLM', 'NAV', 'FUN']
 		self.what_is_allowed()
 		self.coins['ETH'] = Coin(client=self.client, symbol='ETH')
@@ -78,7 +78,7 @@ class BinanceBot:
 						 order_price, 
 						 order_price*qty*0.001, 
 						 self.current_holding_value,
-						 self.current_holding_value*self.ETHUSDT]
+						 self.current_holding_value*self.ETHUSD]
 		self.document_transaction(documentation)
 		
 		return order_price
@@ -120,7 +120,7 @@ class BinanceBot:
 						 order_price, 
 						 order_price*qty*0.001, 
 						 self.current_holding_value,
-						 self.current_holding_value*self.ETHUSDT]
+						 self.current_holding_value*self.ETHUSD]
 		self.document_transaction(documentation)
 		
 		return order_price
@@ -184,7 +184,7 @@ class VolatilityBot(BinanceBot):
 		self.wait_time = 1
 		self.trade_fee = 0.001  # 0.1% fee
 		self.total_fees = 0
-		self.max_trade_value = 2  # ETH
+		self.max_trade_value = 1  # ETH
 		self.minimum_trade_value = 1.1 * self.current_holding_value * (2 * self.trade_fee) # this is in ETH
 				
 	def threshold(self, min_price_in_eth=None, time_between_trades=None):
@@ -207,8 +207,8 @@ class VolatilityBot(BinanceBot):
 		return super().trade_sell(trade_pair, quantity, price)
 		
 	def day_trade(self):
-		while(1):
-			self.ETHUSD = self.coin['ETH'].usd_value
+		while(self.current_holding_value > 0.8):
+			self.ETHUSD = self.coins['ETH'].usd_value
 			# what are we holding?
 			current_coin = self.coins[self.current_holding]
 			# get conservative estimated value for each trade
@@ -383,7 +383,7 @@ class Coin:
 			trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
 		else:
 			# then we want to sell
-			quantity = self.sterilize(self.pair(symbol), qty=base_value/self.books[symbol]['asks'][0])
+			quantity = self.sterilize(self.pair(symbol), qty=base_value/self.books[symbol]['asks'][0][0])
 			trades = [[float(x), float(y)] for [x, y, z] in self.books['bids']]
 		sum = 0
 		count = 0
