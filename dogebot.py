@@ -4,7 +4,7 @@ import pprint
 from itertools import chain
 import time
 import operator
-from datetime import datetime
+from datetime import datetime, timedelta
 import csv
 import os
 
@@ -230,21 +230,38 @@ class VolatilityBot(BinanceBot):
 				best_trade = max(self.deltas.keys(), key=(lambda k: self.deltas[k]))
 				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
 				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance)
-				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f}".format(best_trade, 
-																		  self.deltas[best_trade]*self.current_holding_value,
-																		  min_trade_threshold), end="\r")
+				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty)
+				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} bid depth:{3} ask_depth:{4} ask/bid:{5}".format(
+							best_trade, 
+							abs(self.deltas[best_trade]*self.current_holding_value),
+							min_trade_threshold,
+							bid_depth,
+							ask_depth,
+							float(ask_depth)/float(bid_depth)), 
+							end="\r")
 				if self.deltas[best_trade]*self.current_holding_value > self.minimum_trade_value:
-					self.trade_sell(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
+					if ask_depth >= bid_depth:
+						# market probably is not going up much more
+						self.trade_sell(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
 			else:
 				# check if this has a pair that has decreased enough to be worth trading
 				best_trade = min(self.deltas.keys(), key=(lambda k: self.deltas[k]))
 				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
 				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
-				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f}".format(best_trade, 
-																		  abs(self.deltas[best_trade]*self.current_holding_value),
-																		  min_trade_threshold), end="\r")
+				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty)
+				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} bid depth:{3} ask_depth:{4} bid/ask:{5}".format(
+							best_trade, 
+							abs(self.deltas[best_trade]*self.current_holding_value),
+							min_trade_threshold,
+							bid_depth,
+							ask_depth,
+							float(bid_depth)/float(ask_depth)), 
+							end="\r")
 				if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
-					self.purchase_values[best_trade] = self.trade_buy(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
+					# check the order depth for expected market direction
+					if bid_depth > ask_depth * 1.2:
+						# if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
+						self.purchase_values[best_trade] = self.trade_buy(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
 			# decide if that price is worthwhile to trade (if so we should buy)
 			time.sleep(0.1)
 		
@@ -264,6 +281,7 @@ class Coin:
 		self.increment = {}
 		self.books = {}
 		self.pairs = []
+		self.update_time = datetime.now()-timedelta(days=1)
 		self.balance = 0
 		# decide if this is a base pair
 		if 'ETH' in self.sym or 'BTC' in self.sym:
@@ -348,6 +366,8 @@ class Coin:
 		self.balance = float(self.client.get_asset_balance(asset=self.sym)['free'])
 	
 	def update_books(self, symbol=None):
+		if (datetime.now() - self.update_time).total_seconds() < 1:
+			return
 		#print("updating books for %s"%symbol)
 		if symbol is None:
 			# let's update everything
@@ -358,6 +378,35 @@ class Coin:
 		for antagonist in update_list:
 			self.books[antagonist] = self.client.get_order_book(symbol=self.pair(antagonist)) 
 
+	def order_depth(self, sym, qty):
+		self.update_books()
+		# return bid and ask depth
+		analysis_depth = qty * 100
+		bids = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
+		asks = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
+		
+		num_bid_orders = 0
+		num_ask_orders = 0
+		bid_area = 0
+		ask_area = 0
+		for b in bids:
+			price_delta = (b[0] - bids[0][0])
+			num_bid_orders += b[1]
+			bid_area += price_delta*b[1]
+			if num_bid_orders > analysis_depth:
+				bid_area = bid_area/price_delta
+				break
+		for a in asks:
+			price_delta = (a[0] - asks[0][0])
+			num_ask_orders += a[1]
+			ask_area += price_delta*a[1]
+			if num_ask_orders > analysis_depth:
+				ask_area = ask_area/price_delta
+				break
+		# if buy is bigger, expect price to trend up, if ask is bigger expect price to trend down
+		return (bid_area, ask_area)
+			
+		
 	def update_value(self):
 		self.update_books()
 		self.update_balance()
@@ -383,8 +432,8 @@ class Coin:
 			trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
 		else:
 			# then we want to sell
-			quantity = self.sterilize(self.pair(symbol), qty=base_value/self.books[symbol]['asks'][0][0])
-			trades = [[float(x), float(y)] for [x, y, z] in self.books['bids']]
+			quantity = self.sterilize(self.pair(symbol), qty=base_value/float(self.books[symbol]['asks'][0][0]))
+			trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
 		sum = 0
 		count = 0
 		# print(symbol)
