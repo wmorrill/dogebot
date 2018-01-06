@@ -382,8 +382,8 @@ class Coin:
 		self.update_books()
 		# return bid and ask depth
 		analysis_depth = qty * 100
-		bids = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
-		asks = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
+		bids = [[float(x), float(y)] for [x, y, z] in self.books[sym]['bids']]
+		asks = [[float(x), float(y)] for [x, y, z] in self.books[sym]['asks']]
 		
 		num_bid_orders = 0
 		num_ask_orders = 0
