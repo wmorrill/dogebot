@@ -19,7 +19,7 @@ class BinanceBot:
 		self.current_holding = 'ETH'
 		self.current_holding_qty = 1  # this is in the above
 		self.current_holding_value = 1  # this is in ETH
-		self.coins_of_interest = ['REQ', 'LTC', 'NEO', 'IOTA', 'XLM', 'NAV', 'FUN']
+		self.coins_of_interest = ['TRX', 'XRP', 'BNB', 'VEN', 'REQ', 'LTC', 'ICX', 'XLM', 'APPC']
 		self.what_is_allowed()
 		self.coins['ETH'] = Coin(client=self.client, symbol='ETH')
 		self.coins['BTC'] = Coin(client=self.client, symbol='BTC')
@@ -51,7 +51,7 @@ class BinanceBot:
 		
 	def trade_buy(self, trade_pair, qty, bid_price=None):
 		if bid_price is None: # market order
-			self.current_order = self.client.order_market_buy(symbol=trade_pair, quantity=qty)
+			self.current_order = self.client.order_market_buy(symbol=trade_pair, quantity=qty, newOrderRespType=JSON.FULL)
 		else:
 			self.current_order = self.client.order_limit_buy(symbol=trade_pair,
 															 quantity=qty,
@@ -65,7 +65,12 @@ class BinanceBot:
 			time.sleep(1)
 		
 		order_price = float(self.current_order['price'])		
+		if order_price == 0:
+			list_of_sales = [(float(x['price']), float(x['qty'])) for x in self.current_order['fills']]
+			avg_price = sum([a*b for (a,b) in list_of_sales])/sum([b for (a,b) in list_of_sales])
+			order_price = avg_price
 		print("BUY!!! %s: qty: %d price: %f"%(trade_pair, qty, order_price))
+		self.current_holding = trade_pair[:-3]
 		self.current_holding = trade_pair[:-3]
 		self.current_holding_qty = qty
 		print("now holding: %s, qty: %f, value: %f"%(self.current_holding, self.current_holding_qty, self.current_holding_value))
@@ -85,7 +90,7 @@ class BinanceBot:
 		
 	def trade_sell(self, trade_pair, qty, ask_price=None):
 		if ask_price is None: # market order
-			self.current_order = self.client.order_market_sell(symbol=trade_pair, quantity=qty)
+			self.current_order = self.client.order_market_sell(symbol=trade_pair, quantity=qty, newOrderRespType=JSON.FULL)
 		else: # non-market order
 			print("{0}, type:{1}".format(str(float(ask_price)), type(str(float(ask_price)))))
 			self.current_order = self.client.order_limit_sell(symbol=trade_pair,
@@ -205,7 +210,7 @@ class VolatilityBot(BinanceBot):
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
 		print("Sell: %s x %f @ %s"%(trade_pair, quantity, str(price)))
 		return super().trade_sell(trade_pair, quantity, price)
-		
+	
 	def day_trade(self):
 		while(self.current_holding_value > 0.8):
 			self.ETHUSD = self.coins['ETH'].usd_value
@@ -230,7 +235,7 @@ class VolatilityBot(BinanceBot):
 				best_trade = max(self.deltas.keys(), key=(lambda k: self.deltas[k]))
 				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
 				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance)
-				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty)
+				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, False)
 				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} bid depth:{3} ask_depth:{4} ask/bid:{5}".format(
 							best_trade, 
 							abs(self.deltas[best_trade]*self.current_holding_value),
@@ -240,15 +245,17 @@ class VolatilityBot(BinanceBot):
 							float(ask_depth)/float(bid_depth)), 
 							end="\r")
 				if self.deltas[best_trade]*self.current_holding_value > self.minimum_trade_value:
-					if ask_depth >= bid_depth:
+					if ask_depth >= bid_depth or self.deltas[best_trade]*self.current_holding_value > 10 * self.minimum_trade_value:
 						# market probably is not going up much more
-						self.trade_sell(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
+						self.trade_sell(best_trade, 
+										current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
+										current_coin.sterilize(best_trade, price=self.current_values[sym]))
 			else:
 				# check if this has a pair that has decreased enough to be worth trading
 				best_trade = min(self.deltas.keys(), key=(lambda k: self.deltas[k]))
 				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
 				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
-				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty)
+				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, True)
 				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} bid depth:{3} ask_depth:{4} bid/ask:{5}".format(
 							best_trade, 
 							abs(self.deltas[best_trade]*self.current_holding_value),
@@ -261,7 +268,9 @@ class VolatilityBot(BinanceBot):
 					# check the order depth for expected market direction
 					if bid_depth > ask_depth * 1.2:
 						# if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
-						self.purchase_values[best_trade] = self.trade_buy(best_trade, current_coin.sterilize(best_trade, qty=self.current_holding_qty))
+						self.purchase_values[best_trade] = self.trade_buy(best_trade, 
+																		current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
+																		current_coin.sterilize(best_trade, price=self.current_values[sym]))
 			# decide if that price is worthwhile to trade (if so we should buy)
 			time.sleep(0.1)
 		
@@ -378,10 +387,10 @@ class Coin:
 		for antagonist in update_list:
 			self.books[antagonist] = self.client.get_order_book(symbol=self.pair(antagonist)) 
 
-	def order_depth(self, sym, qty):
+	def order_depth(self, sym, qty, buy_bool=True):
 		self.update_books()
 		# return bid and ask depth
-		analysis_depth = qty * 100
+		analysis_depth = qty * 50
 		bids = [[float(x), float(y)] for [x, y, z] in self.books[sym]['bids']]
 		asks = [[float(x), float(y)] for [x, y, z] in self.books[sym]['asks']]
 		
@@ -389,20 +398,43 @@ class Coin:
 		num_ask_orders = 0
 		bid_area = 0
 		ask_area = 0
-		for b in bids:
-			price_delta = (b[0] - bids[0][0])
-			num_bid_orders += b[1]
-			bid_area += price_delta*b[1]
-			if num_bid_orders > analysis_depth:
-				bid_area = bid_area/price_delta
-				break
-		for a in asks:
-			price_delta = (a[0] - asks[0][0])
-			num_ask_orders += a[1]
-			ask_area += price_delta*a[1]
-			if num_ask_orders > analysis_depth:
-				ask_area = ask_area/price_delta
-				break
+		final_delta = 0
+		
+		if buy_bool:
+			for a in asks:
+				price_delta = abs(a[0] - asks[0][0])
+				num_ask_orders += a[1]
+				ask_area += price_delta*a[1]
+				if num_ask_orders > analysis_depth:
+					break
+			ask_area = ask_area/price_delta
+			final_delta = price_delta
+
+			for b in bids:
+				price_delta = abs(b[0] - asks[0][0])
+				num_bid_orders += b[1]
+				bid_area += price_delta*b[1]
+				if price_delta >= final_delta:
+					break
+			bid_area = bid_area/price_delta
+		else:
+			for b in bids:
+				price_delta = abs(b[0] - bids[0][0])
+				num_bid_orders += b[1]
+				bid_area += price_delta*b[1]
+				if num_bid_orders > analysis_depth:
+					break
+			bid_area = bid_area/price_delta
+			final_delta = price_delta
+			
+			for a in asks:
+				price_delta = abs(a[0] - bids[0][0])
+				num_ask_orders += a[1]
+				ask_area += price_delta*a[1]
+				if price_delta >= final_delta:
+					break
+			ask_area = ask_area/price_delta
+					
 		# if buy is bigger, expect price to trend up, if ask is bigger expect price to trend down
 		return (bid_area, ask_area)
 			
