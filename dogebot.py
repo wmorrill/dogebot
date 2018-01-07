@@ -454,7 +454,7 @@ class Coin:
 		final_delta = 0
 		
 		if buy_bool:
-			for a in asks:
+			for a in asks[1:]:
 				price_delta = abs(a[0] - asks[0][0])
 				num_ask_orders += a[1]
 				ask_area += price_delta*a[1]
@@ -471,7 +471,7 @@ class Coin:
 					break
 			bid_area = bid_area/price_delta
 		else:
-			for b in bids:
+			for b in bids[1:]:
 				price_delta = abs(b[0] - bids[0][0])
 				num_bid_orders += b[1]
 				bid_area += price_delta*b[1]
