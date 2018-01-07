@@ -7,6 +7,8 @@ import operator
 from datetime import datetime, timedelta
 import csv
 import os
+import json
+import collections
 
 class BinanceBot:
 	def __init__(self, api_key, api_secret):
@@ -16,6 +18,7 @@ class BinanceBot:
 		self.client = Client(api_key, api_secret)
 		self.coins = {}
 		self.ETHUSD = 0
+		self.test = True
 		self.current_holding = 'ETH'
 		self.current_holding_qty = 1  # this is in the above
 		self.current_holding_value = 1  # this is in ETH
@@ -27,7 +30,11 @@ class BinanceBot:
 			self.coins[coin] = Coin(client=self.client, symbol=coin)
 			self.coins['ETH'].add_pair(coin)
 			self.coins['BTC'].add_pair(coin)
-			
+	
+	def go_live(self):
+		self.test = False
+		print("This shit just got real...")
+	
 	def what_is_allowed(self):
 		api_limits = self.client.get_exchange_info()
 		self.rate_limits = api_limits['rateLimits']
@@ -204,75 +211,117 @@ class VolatilityBot(BinanceBot):
 	def trade_buy(self, trade_pair, quantity, price=None):
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
 		print("Buy: %s x %f @ %s"%(trade_pair, quantity, str(price)))
+		if self.test:
+			self.current_holding = trade_pair[:-3]
+			self.current_holding_qty = quantity
+			return price
 		return super().trade_buy(trade_pair, quantity, price)
+		
 		
 	def trade_sell(self, trade_pair, quantity, price=None):
 		print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
 		print("Sell: %s x %f @ %s"%(trade_pair, quantity, str(price)))
+		if self.test:
+			self.current_holding = trade_pair[-3:]
+			self.current_holding_qty = quantity
+			if 'BTC' in trade_pair:
+				self.current_holding_value = quantity*15 # rough btc conversion because I am lazy
+			else:
+				self.current_holding_value = quantity
+			return price
 		return super().trade_sell(trade_pair, quantity, price)
+		
 	
 	def day_trade(self):
 		while(self.current_holding_value > 0.8):
-			self.ETHUSD = self.coins['ETH'].usd_value
-			# what are we holding?
-			current_coin = self.coins[self.current_holding]
-			# get conservative estimated value for each trade
-			for p in current_coin.pairs:
-				if p in "USDT":
-					continue
-				sym = current_coin.pair(p)
-				self.current_values[sym] = current_coin.price(p, self.current_holding_value)
-				if sym not in self.purchase_values.keys():
-					# print(sym, self.purchase_values.keys())
-					self.purchase_values[sym] = self.current_values[sym]
-				# print(sym, self.current_values[sym], self.purchase_values[sym])
-				try:
-					self.deltas[sym] = (self.current_values[sym]-self.purchase_values[sym])/self.purchase_values[sym]
-				except TypeError:
-					self.purchase_values[sym] = self.current_values[sym]
-			if not current_coin.is_base:
-				# check if this pair's value increased (then we should sell back to base pair)
-				best_trade = max(self.deltas.keys(), key=(lambda k: self.deltas[k]))
-				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
-				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance)
-				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, False)
-				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} bid depth:{3} ask_depth:{4} ask/bid:{5}".format(
-							best_trade, 
-							abs(self.deltas[best_trade]*self.current_holding_value),
-							min_trade_threshold,
-							bid_depth,
-							ask_depth,
-							float(ask_depth)/float(bid_depth)), 
-							end="\r")
-				if self.deltas[best_trade]*self.current_holding_value > self.minimum_trade_value:
-					if ask_depth >= bid_depth or self.deltas[best_trade]*self.current_holding_value > 10 * self.minimum_trade_value:
-						# market probably is not going up much more
-						self.trade_sell(best_trade, 
-										current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
-										current_coin.sterilize(best_trade, price=self.current_values[sym]))
-			else:
-				# check if this has a pair that has decreased enough to be worth trading
-				best_trade = min(self.deltas.keys(), key=(lambda k: self.deltas[k]))
-				min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
-				self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
-				(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, True)
-				print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} bid depth:{3} ask_depth:{4} bid/ask:{5}".format(
-							best_trade, 
-							abs(self.deltas[best_trade]*self.current_holding_value),
-							min_trade_threshold,
-							bid_depth,
-							ask_depth,
-							float(bid_depth)/float(ask_depth)), 
-							end="\r")
-				if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
-					# check the order depth for expected market direction
-					if bid_depth > ask_depth * 1.2:
-						# if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
-						self.purchase_values[best_trade] = self.trade_buy(best_trade, 
-																		current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
-																		current_coin.sterilize(best_trade, price=self.current_values[sym]))
-			# decide if that price is worthwhile to trade (if so we should buy)
-			time.sleep(0.1)
+			try:
+				self.ETHUSD = self.coins['ETH'].usd_value
+				# what are we holding?
+				current_coin = self.coins[self.current_holding]
+				# get conservative estimated value for each trade
+				allowed_pairs = []
+				for p in current_coin.pairs:
+					if p in "USDT":
+						continue
+					sym = current_coin.pair(p)
+					allowed_pairs.append(sym)
+					self.current_values[sym] = current_coin.price(p, self.current_holding_value)
+					if sym not in self.purchase_values.keys():
+						#print(sym, self.purchase_values.keys())
+						self.purchase_values[sym] = self.current_values[sym]
+					# print(sym, self.current_values[sym], self.purchase_values[sym])
+					try:
+						self.deltas[sym] = (self.current_values[sym]-self.purchase_values[sym])/self.purchase_values[sym]
+					except TypeError:
+						print("Type Error - line 252")
+						self.purchase_values[sym] = self.current_values[sym]
+					#print(self.current_values[sym], self.purchase_values[sym])
+				if not current_coin.is_base:
+					# check if this pair's value increased (then we should sell back to base pair)
+					best_trade = max(allowed_pairs, key=(lambda k: self.deltas[k]))
+					if self.test:
+						min_trade_threshold = self.minimum_trade_value
+						self.current_holding_qty = self.max_trade_value/self.current_values[best_trade]
+					else:
+						min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
+						self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance)
+					try:
+						(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, False)
+					except KeyError:
+						print("Key Error - line 245")
+						print(current_coin.sym)
+						print(current_coin.is_base)
+						print(best_trade.replace(current_coin.sym, ""))
+						
+					print("pair:{0:} delta:{1:1.6f} value increase:{2:1.6f} threshold:{3:1.6f} Gap:{4}% ask/bid:{5}".format(
+								best_trade, 
+								self.deltas[best_trade],
+								abs(self.deltas[best_trade]*self.current_holding_value),
+								min_trade_threshold,
+								current_coin.avg_gap(),
+								float(ask_depth)/float(bid_depth)), 
+								end="\r")
+					if self.deltas[best_trade]*self.current_holding_value > self.minimum_trade_value:
+						if ask_depth >= bid_depth or self.deltas[best_trade]*self.current_holding_value > 5 * self.minimum_trade_value:
+							# market probably is not going up much more
+							print()
+							self.purchase_values = self.current_values
+							print("Price: %f"%self.current_values[best_trade])
+							self.trade_sell(best_trade, 
+											current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
+											current_coin.sterilize(best_trade, price=self.current_values[best_trade]))
+							
+				else:
+					# check if this has a pair that has decreased enough to be worth trading
+					best_trade = min(self.deltas.keys(), key=(lambda k: self.deltas[k]))
+					if self.test:
+						min_trade_threshold = self.minimum_trade_value
+						self.current_holding_qty = self.max_trade_value/self.current_values[best_trade]
+					else:
+						min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
+						self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
+					(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, True)
+					print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} gap:{3}% bid/ask:{4}".format(
+								best_trade, 
+								abs(self.deltas[best_trade]*self.current_holding_value),
+								min_trade_threshold,
+								current_coin.avg_gap(),
+								float(bid_depth)/float(ask_depth)), 
+								end="\r")
+					if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
+						# check the order depth for expected market direction
+						if bid_depth >= ask_depth * 2 and current_coin.avg_gap() < 0.75:
+							# if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
+							print()
+							for s in self.current_values:
+								self.purchase_values[s] = self.current_values[s]
+							print("Price: %f"%self.current_values[best_trade])
+							self.purchase_values[best_trade] = self.trade_buy(best_trade, 
+																			current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
+																			current_coin.sterilize(best_trade, price=self.current_values[best_trade]))
+			except json.decoder.JSONDecodeError:
+				print("JSON Error...")
+			time.sleep(1)
 		
 		
 class Coin:
@@ -290,8 +339,8 @@ class Coin:
 		self.increment = {}
 		self.books = {}
 		self.pairs = []
-		self.update_time = datetime.now()-timedelta(days=1)
 		self.balance = 0
+		self.gap = collections.deque(5*[0], 5)
 		# decide if this is a base pair
 		if 'ETH' in self.sym or 'BTC' in self.sym:
 			self.is_base = True
@@ -370,22 +419,26 @@ class Coin:
 			print("you can't trade with yourself")
 			return False
 		self.pairs.append(symbol)
+		self.books[symbol] = {}
+		self.books[symbol]['updated'] = datetime.now()-timedelta(days=1)
 	
 	def update_balance(self):
 		self.balance = float(self.client.get_asset_balance(asset=self.sym)['free'])
 	
 	def update_books(self, symbol=None):
-		if (datetime.now() - self.update_time).total_seconds() < 1:
-			return
 		#print("updating books for %s"%symbol)
 		if symbol is None:
 			# let's update everything
-			update_list = self.pairs
+			_ = [self.update_books(s) for s in self.pairs]
 		else:
-			# lets just check that one to be efficient
-			update_list = [symbol,]
-		for antagonist in update_list:
-			self.books[antagonist] = self.client.get_order_book(symbol=self.pair(antagonist)) 
+			if (datetime.now() - self.books[symbol]['updated']).total_seconds() < 1:
+				return
+			else:
+				self.books[symbol]['updated'] = datetime.now()
+			temp_dict = self.client.get_order_book(symbol=self.pair(symbol)) 
+			self.books[symbol]['bids'] = temp_dict['bids']
+			self.books[symbol]['asks'] = temp_dict['asks']
+			self.gap.appendleft(abs(float(self.books[symbol]['bids'][0][0]) - float(self.books[symbol]['asks'][0][0]))/float(self.books[symbol]['asks'][0][0]))
 
 	def order_depth(self, sym, qty, buy_bool=True):
 		self.update_books()
@@ -454,18 +507,21 @@ class Coin:
 			self.eth_value = self.balance * float(self.books['ETH']['asks'][0][0])
 			self.btc_value = self.balance * float(self.books['BTC']['asks'][0][0])
 			self.usd_value = None
-			
+	
+	def avg_gap(self):
+		return 100 * sum(self.gap)/len(self.gap)
+	
 	def price(self, symbol, base_value):
 		self.update_books(symbol)
 		
 		if self.is_base:
 			#then we want to buy
-			quantity = base_value
 			trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
+			quantity = base_value/trades[0][0]
 		else:
 			# then we want to sell
-			quantity = self.sterilize(self.pair(symbol), qty=base_value/float(self.books[symbol]['asks'][0][0]))
 			trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
+			quantity = base_value/trades[0][0]
 		sum = 0
 		count = 0
 		# print(symbol)
@@ -474,7 +530,9 @@ class Coin:
 			sum += i[1]
 			count += 1
 			if sum >= quantity*1.2:
-				# print("expect %d trades @ price: %f" %(count, i[0]))
+				# print("%s expect %d trades @ price: %f" %(symbol, count, i[0]))
+				# print(count, i[0])
+				# print(trades)
 				return self.sterilize(self.pair(symbol), price=i[0])
 		return 
 			
