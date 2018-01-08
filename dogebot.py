@@ -227,10 +227,37 @@ class VolatilityBot(BinanceBot):
 			if 'BTC' in trade_pair:
 				self.current_holding_value = quantity*15 # rough btc conversion because I am lazy
 			else:
-				self.current_holding_value = quantity
+				self.current_holding_value = quantity * price
 			return price
 		return super().trade_sell(trade_pair, quantity, price)
 		
+	def update_values(self, coin = "ETH"):
+		allowed_pairs = []
+		for cc in self.coins:
+			current_coin = self.coins[cc]
+			for p in current_coin.pairs:
+				if p in "USDT":
+					continue
+				sym = current_coin.pair(p)
+				if current_coin.sym in coin:
+					allowed_pairs.append(sym)
+				self.current_values[sym] = current_coin.price(p, self.current_holding_value)
+				if sym not in self.purchase_values.keys():
+					#print(sym, self.purchase_values.keys())
+					self.purchase_values[sym] = self.current_values[sym]
+				# print(sym, self.current_values[sym], self.purchase_values[sym])
+				try:
+					self.deltas[sym] = (self.current_values[sym]-self.purchase_values[sym])/self.purchase_values[sym]
+				except TypeError:
+					print("Type Error - line 250")
+					print(sym)
+					print(current_holding_value)
+					print(current_coin.price(p, self.current_holding_value))
+					print(self.current_values[sym])
+					print(self.purchase_values[sym])
+					print(self.deltas[sym])
+				#print(self.current_values[sym], self.purchase_values[sym])
+		return allowed_pairs
 	
 	def day_trade(self):
 		while(self.current_holding_value > 0.8):
@@ -239,23 +266,7 @@ class VolatilityBot(BinanceBot):
 				# what are we holding?
 				current_coin = self.coins[self.current_holding]
 				# get conservative estimated value for each trade
-				allowed_pairs = []
-				for p in current_coin.pairs:
-					if p in "USDT":
-						continue
-					sym = current_coin.pair(p)
-					allowed_pairs.append(sym)
-					self.current_values[sym] = current_coin.price(p, self.current_holding_value)
-					if sym not in self.purchase_values.keys():
-						#print(sym, self.purchase_values.keys())
-						self.purchase_values[sym] = self.current_values[sym]
-					# print(sym, self.current_values[sym], self.purchase_values[sym])
-					try:
-						self.deltas[sym] = (self.current_values[sym]-self.purchase_values[sym])/self.purchase_values[sym]
-					except TypeError:
-						print("Type Error - line 252")
-						self.purchase_values[sym] = self.current_values[sym]
-					#print(self.current_values[sym], self.purchase_values[sym])
+				allowed_pairs = self.update_values(current_coin.sym)
 				if not current_coin.is_base:
 					# check if this pair's value increased (then we should sell back to base pair)
 					best_trade = max(allowed_pairs, key=(lambda k: self.deltas[k]))
@@ -273,7 +284,7 @@ class VolatilityBot(BinanceBot):
 						print(current_coin.is_base)
 						print(best_trade.replace(current_coin.sym, ""))
 						
-					print("pair:{0:} delta:{1:1.6f} value increase:{2:1.6f} threshold:{3:1.6f} Gap:{4}% ask/bid:{5}".format(
+					print("pair:{0:} delta:{1:1.6f} value increase:{2:1.6f} threshold:{3:1.6f} Gap:{4:1.2f}% ask/bid:{5}".format(
 								best_trade, 
 								self.deltas[best_trade],
 								abs(self.deltas[best_trade]*self.current_holding_value),
@@ -285,15 +296,17 @@ class VolatilityBot(BinanceBot):
 						if ask_depth >= bid_depth or self.deltas[best_trade]*self.current_holding_value > 5 * self.minimum_trade_value:
 							# market probably is not going up much more
 							print()
-							self.purchase_values = self.current_values
+							for s in self.current_values.keys():
+								self.purchase_values[s] = self.current_values[s]
 							print("Price: %f"%self.current_values[best_trade])
 							self.trade_sell(best_trade, 
 											current_coin.sterilize(best_trade, qty=self.current_holding_qty), 
 											current_coin.sterilize(best_trade, price=self.current_values[best_trade]))
 							
+							
 				else:
 					# check if this has a pair that has decreased enough to be worth trading
-					best_trade = min(self.deltas.keys(), key=(lambda k: self.deltas[k]))
+					best_trade = min(allowed_pairs, key=(lambda k: self.deltas[k]))
 					if self.test:
 						min_trade_threshold = self.minimum_trade_value
 						self.current_holding_qty = self.max_trade_value/self.current_values[best_trade]
@@ -301,7 +314,7 @@ class VolatilityBot(BinanceBot):
 						min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
 						self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
 					(bid_depth, ask_depth) = current_coin.order_depth(best_trade.replace(current_coin.sym, ""), self.current_holding_qty, True)
-					print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} gap:{3}% bid/ask:{4}".format(
+					print("pair:{0:} value increase:{1:1.6f} threshold:{2:1.6f} gap:{3:1.2f}% bid/ask:{4}".format(
 								best_trade, 
 								abs(self.deltas[best_trade]*self.current_holding_value),
 								min_trade_threshold,
@@ -313,7 +326,7 @@ class VolatilityBot(BinanceBot):
 						if bid_depth >= ask_depth * 2 and current_coin.avg_gap() < 0.75:
 							# if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
 							print()
-							for s in self.current_values:
+							for s in self.current_values.keys():
 								self.purchase_values[s] = self.current_values[s]
 							print("Price: %f"%self.current_values[best_trade])
 							self.purchase_values[best_trade] = self.trade_buy(best_trade, 
@@ -443,7 +456,7 @@ class Coin:
 	def order_depth(self, sym, qty, buy_bool=True):
 		self.update_books()
 		# return bid and ask depth
-		analysis_depth = qty * 50
+		analysis_depth = qty * 25
 		bids = [[float(x), float(y)] for [x, y, z] in self.books[sym]['bids']]
 		asks = [[float(x), float(y)] for [x, y, z] in self.books[sym]['asks']]
 		
