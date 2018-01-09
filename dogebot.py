@@ -154,7 +154,7 @@ class BinanceBot:
         self.pp.pprint(self.balance)
         
     def cancel_order(self, sym):
-        result = self.client.cancel_order(sym, self.current_order['orderID'])
+        result = self.client.cancel_order(symbol = sym, orderId = self.current_order['orderId'])
         return result
             
     def get_recent_trades(self, symbol='ETHBTC'):
