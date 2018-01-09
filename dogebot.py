@@ -272,7 +272,7 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                        qty=self.current_holding_qty,
-                                                       price = self.purchase_values(current_coin.sym + 'ETH') + 5 * break_even_delta)
+                                                       price = self.purchase_values[current_coin.sym + 'ETH'] + 5 * break_even_delta)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
@@ -287,7 +287,7 @@ class VolatilityBot(BinanceBot):
                         # place new order at current_price
                         (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                        qty=self.current_holding_qty,
-                                                       price = self.purchase_values(current_coin.sym + 'ETH') + 4 * break_even_delta)
+                                                       price = self.purchase_values[current_coin.sym + 'ETH'] + 4 * break_even_delta)
                         if self.trade_sell(current_coin.sym+'ETH', q, p):
                             self.current_holding = 'ETH'
                             continue
@@ -300,7 +300,7 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                            qty=self.current_holding_qty,
-                                                           price = self.purchase_values(current_coin.sym + 'ETH') + 3 * break_even_delta)
+                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + 3 * break_even_delta)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
@@ -313,7 +313,7 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                            qty=self.current_holding_qty,
-                                                           price = self.purchase_values(current_coin.sym + 'ETH') + 2 * break_even_delta)
+                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + 2 * break_even_delta)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
@@ -326,7 +326,7 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                            qty=self.current_holding_qty,
-                                                           price = self.purchase_values(current_coin.sym + 'ETH') + break_even_delta)
+                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + break_even_delta)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
