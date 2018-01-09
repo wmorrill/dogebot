@@ -67,10 +67,15 @@ class BinanceBot:
         orderID = self.current_order['orderId']
         
         # let's make sure this works before moving on
+        buy_clock = datetime.now()
         while(self.current_order['status'] not in "FILLED"): 
             print("Waiting for order to fill...", end="\r")
             self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
             time.sleep(1)
+            if (datetime.now()-buy_clock).total_seconds() > 60:
+                print("Canceling the trade since the moment has passed")
+                self.cancel_order(trade_pair)
+                return
         
         order_price = float(self.current_order['price'])
         qty = float(self.current_order['executedQty'])
@@ -546,7 +551,7 @@ class Coin:
     def order_depth(self, sym, qty, buy_bool=True):
         self.update_books()
         # return bid and ask depth
-        analysis_depth = qty * 20
+        analysis_depth = qty * 30
         bids = [[float(x), float(y)] for [x, y, z] in self.books[sym]['bids']]
         asks = [[float(x), float(y)] for [x, y, z] in self.books[sym]['asks']]
         
