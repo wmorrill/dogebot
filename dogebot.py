@@ -359,7 +359,7 @@ class VolatilityBot(BinanceBot):
                                 end="\r")
                     if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
                         # check the order depth for expected market direction
-                        if current_coin.avg_gap() < 0.55:
+                        if current_coin.avg_gap() < 0.55 and depth_dict[best_trade] > 2:
                             # if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
                             print()
                             for s in self.current_values.keys():
