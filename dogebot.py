@@ -486,10 +486,14 @@ class Coin:
         # elif price and price < self.min_price:
             # price = self.min_price
         if qty:
-            qty = float(int(qty/self.increment[sym])*self.increment[sym])
+            precision = len(str(int(1/self.increment[sym])))-1
+            qty = round(qty, precision)
+            # qty = float(int(qty/self.increment[sym])*self.increment[sym])
             
         if price:
-            price = float(int(price/self.tick[sym])*self.tick[sym])
+            precision = len(str(int(1/self.tick[sym])))-1
+            price = round(price, precision)
+            # price = float(int(price/self.tick[sym])*self.tick[sym])
             if qty:
                 return (qty, price)
             else:
