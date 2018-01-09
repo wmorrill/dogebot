@@ -74,8 +74,8 @@ class BinanceBot:
             time.sleep(1)
             if (datetime.now()-buy_clock).total_seconds() > 60:
                 print("Canceling the trade since the moment has passed")
-                self.cancel_order(trade_pair)
-                return
+                if self.cancel_order(trade_pair):
+                    return
         
         order_price = float(self.current_order['price'])
         qty = float(self.current_order['executedQty'])
@@ -154,8 +154,11 @@ class BinanceBot:
         self.pp.pprint(self.balance)
         
     def cancel_order(self, sym):
-        result = self.client.cancel_order(symbol = sym, orderId = self.current_order['orderId'])
-        return result
+        try:
+            result = self.client.cancel_order(symbol = sym, orderId = self.current_order['orderId'])
+        except:
+            return False
+        return True
             
     def get_recent_trades(self, symbol='ETHBTC'):
         recent_trades = self.client.get_recent_trades(symbol='ETHBTC')
@@ -293,41 +296,41 @@ class VolatilityBot(BinanceBot):
                     elif waiting.total_seconds() > 10*60 and self.impatience_level == 2:
                         print("Growing more impatient")
                         # cancel current order
-                        self.cancel_order(current_coin.sym + 'ETH')
-                        # place new order at current_price
-                        (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
-                                                       qty=self.current_holding_qty,
-                                                       price = self.purchase_values(current_coin.sym + 'ETH') + 3 * break_even_delta)
-                        if self.trade_sell(current_coin.sym+'ETH', q, p):
-                            self.current_holding = 'ETH'
-                            continue
-                        self.impatience_level = 3
+                        if self.cancel_order(current_coin.sym + 'ETH'):
+                            # place new order at current_price
+                            (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
+                                                           qty=self.current_holding_qty,
+                                                           price = self.purchase_values(current_coin.sym + 'ETH') + 3 * break_even_delta)
+                            if self.trade_sell(current_coin.sym+'ETH', q, p):
+                                self.current_holding = 'ETH'
+                                continue
+                            self.impatience_level = 3
                     # 20-25 min - limit 2x
                     elif waiting.total_seconds() > 15*60 and self.impatience_level == 3:
                         print("Growing more impatient")
                         # cancel current order
-                        self.cancel_order(current_coin.sym + 'ETH')
-                        # place new order at current_price
-                        (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
-                                                       qty=self.current_holding_qty,
-                                                       price = self.purchase_values(current_coin.sym + 'ETH') + 2 * break_even_delta)
-                        if self.trade_sell(current_coin.sym+'ETH', q, p):
-                            self.current_holding = 'ETH'
-                            continue
-                        self.impatience_level = 4
+                        if self.cancel_order(current_coin.sym + 'ETH'):
+                            # place new order at current_price
+                            (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
+                                                           qty=self.current_holding_qty,
+                                                           price = self.purchase_values(current_coin.sym + 'ETH') + 2 * break_even_delta)
+                            if self.trade_sell(current_coin.sym+'ETH', q, p):
+                                self.current_holding = 'ETH'
+                                continue
+                            self.impatience_level = 4
                     # 25 min + - limit 1x (let's just get our money back on this one)
                     else:
                         print("Fully impatient")
                         # cancel current order
-                        self.cancel_order(current_coin.sym + 'ETH')
-                        # place new order at current_price
-                        (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
-                                                       qty=self.current_holding_qty,
-                                                       price = self.purchase_values(current_coin.sym + 'ETH') + break_even_delta)
-                        if self.trade_sell(current_coin.sym+'ETH', q, p):
-                            self.current_holding = 'ETH'
-                            continue
-                        self.impatience_level = 5
+                        if self.cancel_order(current_coin.sym + 'ETH'):
+                            # place new order at current_price
+                            (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
+                                                           qty=self.current_holding_qty,
+                                                           price = self.purchase_values(current_coin.sym + 'ETH') + break_even_delta)
+                            if self.trade_sell(current_coin.sym+'ETH', q, p):
+                                self.current_holding = 'ETH'
+                                continue
+                            self.impatience_level = 5
                     # OR if we are greater than 1.1x AND market looks negative
                     (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                    qty=self.current_holding_qty,
@@ -337,11 +340,11 @@ class VolatilityBot(BinanceBot):
                         (bid_depth, ask_depth) = current_coin.order_depth('ETH', self.current_holding_qty, False)
                         if ask_depth >= bid_depth:
                             # cancel current order
-                            self.cancel_order(current_coin.sym + 'ETH')
-                            # place new order at current_price
-                            if self.trade_sell(current_coin.sym+'ETH', q, p):
-                                self.current_holding = 'ETH'
-                                continue
+                            if self.cancel_order(current_coin.sym + 'ETH'):
+                                # place new order at current_price
+                                if self.trade_sell(current_coin.sym+'ETH', q, p):
+                                    self.current_holding = 'ETH'
+                                    continue
                             
                 else:
                     # get conservative estimated value for each trade
@@ -386,6 +389,7 @@ class VolatilityBot(BinanceBot):
                             print("Price: %f"%self.current_values[best_trade])
                             self.trade_buy(best_trade, q, p)
                             self.impatience_level = 0
+                            self.t0 = datetime.now()
 
 
                 
