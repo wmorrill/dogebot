@@ -54,7 +54,7 @@ class ErrorSafeClient(Client):
         return super().get_recent_trades(**params)
 
     def cancel_order(self, **params):
-        return super().cancel_order(s**params)
+        return super().cancel_order(**params)
 
     def get_order_book(self, **params):
         return super().get_order_book(**params)
@@ -73,7 +73,8 @@ class BinanceBot:
         self.current_holding = 'ETH'
         self.current_holding_qty = 1  # this is in the above
         self.current_holding_value = 1  # this is in ETH
-        self.coins_of_interest = ['TRX', 'XRP', 'XVG', 'NEBL', 'ICX', 'BNB', 'ZRX', 'ADA', 'APPC']
+        # self.coins_of_interest = ['TRX', 'XRP', 'VIBE', 'NEO', 'APPC', 'EOS', 'ICX', 'LRC', 'ADA' ]
+        self.coins_of_interest = self.get_24hr_volume()
         # should get top 10 most traded coins from binance automatically daily
         self.rate_limits = None
         self.what_is_allowed()
@@ -95,7 +96,18 @@ class BinanceBot:
             elif 'ORDERS' in d['rateLimitType']:
                 print("Max Orders per %s: %d" % (d['interval'], d['limit']))
         # symbol_limits = api_limits['symbols']
-        
+
+    def get_24hr_volume(self):
+        high_volume_coins = []
+        ticker = self.client.get_ticker()
+        for t in ticker:
+            if 'ETH' in t['symbol'][-3:]:
+                if float(t['quoteVolume']) > 25000:
+                    high_volume_coins.append(t['symbol'][:-3])
+        print('Coins of Interest:')
+        self.pp.pprint(high_volume_coins)
+        return high_volume_coins
+
     def document_transaction(self, data_list, filename="c:\\git\\dogebot\\trade_documentation.csv"):
         write_headers = False
         if not os.path.isfile(filename):
@@ -428,7 +440,7 @@ class VolatilityBot(BinanceBot):
                     else:
                         min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
                         self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
-                    print("pair:{0:} price:{1:1.6f} delta: {2:1.6f} value increase:{3:1.6f} threshold:{4:1.6f} gap:{5:1.2f}% bid/ask:{6}".format(
+                    print("pair:{0:} price:{1:1.6f} delta: {2:1.6f} value increase:{3:1.6f} threshold:{4:1.6f} gap:{5:1.2f}% bid/ask:{6:1.2f}".format(
                                 best_trade, 
                                 self.current_values[best_trade],
                                 self.deltas[best_trade],
@@ -521,11 +533,11 @@ class Coin:
             qty = round(qty, precision)
             # qty = float(int(qty/self.increment[sym])*self.increment[sym])
             
-        if price:
+        if price is not None:
             precision = len(str(int(1/self.tick[sym])))-1
             price = round(price, precision)
             # price = float(int(price/self.tick[sym])*self.tick[sym])
-            if qty:
+            if qty is not None:
                 return (qty, price)
             else:
                 return(price)
