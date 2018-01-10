@@ -209,7 +209,7 @@ class VolatilityBot(BinanceBot):
         if self.current_holding not in 'ETH':
             # if not sell that shit
             trade_pair = self.current_holding + 'ETH'
-            self.trade_sell(trade_pair, self.current_holding_qty, self.purchase_prices[trade_pair])
+            self.trade_sell(trade_pair, self.current_holding_qty, self.purchase_values[trade_pair])
 
     def threshold(self, min_price_in_eth=None, time_between_trades=None):
         if min_price_in_eth:
