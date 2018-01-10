@@ -333,7 +333,7 @@ class VolatilityBot(BinanceBot):
                     # determine sell limit (current price + min_trade_threshold)
                     break_even_delta = 2 * .001 * self.purchase_values[current_coin.sym + 'ETH']
                     # check if sale is complete
-                    if self.impatience_level > 0 and self.get_order_status():
+                    if self.impatience_level > 0 and self.get_order_status(self.current_order['symbol']):
                         self.current_holding = 'ETH'
                         continue # go to the next iteration of the while loop
                     waiting = datetime.now()-self.t0
