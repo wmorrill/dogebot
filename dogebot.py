@@ -122,7 +122,7 @@ class BinanceBot:
             print("SELL:%s \tPlacing a sell limit - qty: %d price: %f"%(trade_pair, qty, ask_price))
             time.sleep(1)
             # let's see if this settled immediately
-            return self.check_order_status(trade_pair)
+            return self.get_order_status(trade_pair)
         except BinanceAPIException:
             print("API Error in trade_sell")
             # binance connect is flaky sometimes
