@@ -173,14 +173,14 @@ class BinanceBot:
                                                               price=str(float(ask_price)),
                                                               newOrderRespType=ORDER_RESP_TYPE_FULL)
 
-        qty = float(self.current_order['executedQty'])
+        #qty = float(self.current_order['executedQty'])
         print("SELL:%s \tPlacing a sell limit - qty: %d price: %f"%(trade_pair, qty, ask_price))
         time.sleep(1)
         # let's see if this settled immediately
         return self.get_order_status(trade_pair)
 
     def get_order_status(self, trade_pair):
-        self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderID'])
+        self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderId'])
         if(self.current_order['status'] not in "FILLED"): 
             return False
         else:    
