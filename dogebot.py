@@ -1,5 +1,6 @@
 from binance.client import Client
 from binance.enums import *
+from binance.exceptions import *
 import pprint
 from itertools import chain
 import time
@@ -9,6 +10,7 @@ import csv
 import os
 import json
 import collections
+import atexit
 
 class BinanceBot:
     def __init__(self, api_key, api_secret):
@@ -30,7 +32,7 @@ class BinanceBot:
         for coin in self.coins_of_interest:
             self.coins[coin] = Coin(client=self.client, symbol=coin)
             self.coins['ETH'].add_pair(coin)
-    
+
     def go_live(self):
         self.test = False
         print("This shit just got real...")
@@ -57,64 +59,74 @@ class BinanceBot:
             writer.writerow(data_list)
         
     def trade_buy(self, trade_pair, qty, bid_price=None):
-        if bid_price is None: # market order
-            self.current_order = self.client.order_market_buy(symbol=trade_pair, quantity=qty, newOrderRespType=ORDER_RESP_TYPE_FULL)
-        else:
-            self.current_order = self.client.order_limit_buy(symbol=trade_pair,
-                                                             quantity=qty,
-                                                             price=str(float(bid_price)),
-                                                             newOrderRespType=ORDER_RESP_TYPE_FULL)
-        orderID = self.current_order['orderId']
-        
-        # let's make sure this works before moving on
-        buy_clock = datetime.now()
-        while(self.current_order['status'] not in "FILLED"): 
-            print("Waiting for order to fill...", end="\r")
-            self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
-            time.sleep(1)
-            if (datetime.now()-buy_clock).total_seconds() > 60:
-                print("Canceling the trade since the moment has passed")
-                if self.cancel_order(trade_pair):
-                    return
-        
-        order_price = float(self.current_order['price'])
-        qty = float(self.current_order['executedQty'])
-        if order_price == 0:
-            list_of_sales = [(float(x['price']), float(x['qty'])) for x in self.current_order['fills']]
-            avg_price = sum([a*b for (a,b) in list_of_sales])/sum([b for (a,b) in list_of_sales])
-            order_price = avg_price
-        print("BUY!!! %s: qty: %d price: %f"%(trade_pair, qty, order_price))
-        self.current_holding = trade_pair[:-3]
-        self.current_holding_qty = qty
-        print("now holding: %s, qty: %f, value: %f"%(self.current_holding, self.current_holding_qty, self.current_holding_value))
-        
-        documentation = [datetime.now(), 
-                         self.current_holding, 
-                         trade_pair, 
-                         'BUY', 
-                         qty, 
-                         order_price, 
-                         order_price*qty*0.001, 
-                         self.current_holding_value,
-                         self.current_holding_value*self.ETHUSD]
-        self.document_transaction(documentation)
-        
-        return order_price
+        try:
+            if bid_price is None: # market order
+                self.current_order = self.client.order_market_buy(symbol=trade_pair, quantity=qty, newOrderRespType=ORDER_RESP_TYPE_FULL)
+            else:
+                self.current_order = self.client.order_limit_buy(symbol=trade_pair,
+                                                                 quantity=qty,
+                                                                 price=str(float(bid_price)),
+                                                                 newOrderRespType=ORDER_RESP_TYPE_FULL)
+            orderID = self.current_order['orderId']
+
+            # let's make sure this works before moving on
+            buy_clock = datetime.now()
+            while(self.current_order['status'] not in "FILLED"):
+                print("Waiting for order to fill...", end="\r")
+                self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
+                time.sleep(1)
+                if (datetime.now()-buy_clock).total_seconds() > 60:
+                    print("Canceling the trade since the moment has passed")
+                    if self.cancel_order(trade_pair):
+                        return
+
+            order_price = float(self.current_order['price'])
+            qty = float(self.current_order['executedQty'])
+            if order_price == 0:
+                list_of_sales = [(float(x['price']), float(x['qty'])) for x in self.current_order['fills']]
+                avg_price = sum([a*b for (a,b) in list_of_sales])/sum([b for (a,b) in list_of_sales])
+                order_price = avg_price
+            print("BUY!!! %s: qty: %d price: %f"%(trade_pair, qty, order_price))
+            self.current_holding = trade_pair[:-3]
+            self.current_holding_qty = qty*.999
+            print("now holding: %s, qty: %f, value: %f"%(self.current_holding, self.current_holding_qty, self.current_holding_value))
+
+            documentation = [datetime.now(),
+                             self.current_holding,
+                             trade_pair,
+                             'BUY',
+                             qty,
+                             order_price,
+                             order_price*qty*0.001,
+                             self.current_holding_value,
+                             self.current_holding_value*self.ETHUSD]
+            self.document_transaction(documentation)
+
+            return order_price
+        except BinanceAPIException:
+            print("API Error in trade_buy")
+            # binance connect is flaky sometimes
+            return self.trade_buy(trade_pair, qty, bid_price)
         
     def trade_sell(self, trade_pair, qty, ask_price=None):
-        if ask_price is None: # market order
-            self.current_order = self.client.order_market_sell(symbol=trade_pair, quantity=qty, newOrderRespType=ORDER_RESP_TYPE_FULL)
-        else: # non-market order
-            self.current_order = self.client.order_limit_sell(symbol=trade_pair,
-                                                              quantity=qty,
-                                                              price=str(float(ask_price)),
-                                                              newOrderRespType=ORDER_RESP_TYPE_FULL)
-        
-        qty = float(self.current_order['qty'])
-        print("SELL:%s \tPlacing a sell limit - qty: %d price: %f"%(trade_pair, qty, ask_price))
-        time.sleep(1)
-        # let's see if this settled immediately
-        return self.check_order_status(trade_pair)
+        try:
+            if ask_price is None: # market order
+                self.current_order = self.client.order_market_sell(symbol=trade_pair, quantity=qty, newOrderRespType=ORDER_RESP_TYPE_FULL)
+            else: # non-market order
+                self.current_order = self.client.order_limit_sell(symbol=trade_pair,
+                                                                  quantity=qty,
+                                                                  price=str(float(ask_price)),
+                                                                  newOrderRespType=ORDER_RESP_TYPE_FULL)
+
+            qty = float(self.current_order['executedQty'])
+            print("SELL:%s \tPlacing a sell limit - qty: %d price: %f"%(trade_pair, qty, ask_price))
+            time.sleep(1)
+            # let's see if this settled immediately
+            return self.check_order_status(trade_pair)
+        except BinanceAPIException:
+            print("API Error in trade_sell")
+            # binance connect is flaky sometimes
+            return self.trade_sell(trade_pair, qty, ask_price)
     
     def get_order_status(self, trade_pair):
         self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderID'])
@@ -181,6 +193,7 @@ class MarketDepthBot(BinanceBot):
 class VolatilityBot(BinanceBot):
     def __init__(self, api_key, api_secret):
         super().__init__(api_key, api_secret)
+        atexit.register(self.exit)
         self.purchase_values = {}
         self.current_values = {}
         self.deltas = {}
@@ -190,7 +203,14 @@ class VolatilityBot(BinanceBot):
         self.max_trade_value = 1  # ETH
         self.t0 = datetime.now()
         self.minimum_trade_value = 1.1 * self.current_holding_value * (2 * self.trade_fee) # this is in ETH
-                
+
+    def exit(self):
+        # check if we are holding ETH
+        if self.current_holding not in 'ETH':
+            # if not sell that shit
+            trade_pair = self.current_holding + 'ETH'
+            self.trade_sell(trade_pair, self.current_holding_qty, self.purchase_prices[trade_pair])
+
     def threshold(self, min_price_in_eth=None, time_between_trades=None):
         if min_price_in_eth:
             self.minimum_trade_value = min_price_in_eth
