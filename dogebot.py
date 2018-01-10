@@ -530,12 +530,12 @@ class Coin:
             # price = self.min_price
         if qty:
             precision = len(str(int(1/self.increment[sym])))-1
-            qty = round(qty, precision)
+            qty = float("{0:1.{1:}}".format(qty, precision))
             # qty = float(int(qty/self.increment[sym])*self.increment[sym])
-            
+
         if price is not None:
             precision = len(str(int(1/self.tick[sym])))-1
-            price = round(price, precision)
+            price = float("{0:1.{1:}}".format(price, precision))
             # price = float(int(price/self.tick[sym])*self.tick[sym])
             if qty is not None:
                 return (qty, price)
