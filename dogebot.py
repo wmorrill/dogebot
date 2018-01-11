@@ -125,7 +125,7 @@ class BinanceBot:
         else:
             self.current_order = self.client.order_limit_buy(symbol=trade_pair,
                                                              quantity=qty,
-                                                             price=str(float(bid_price)),
+                                                             price='{:1.8f}'.format(float(bid_price)),
                                                              newOrderRespType=ORDER_RESP_TYPE_FULL)
         orderID = self.current_order['orderId']
 
@@ -139,9 +139,18 @@ class BinanceBot:
                 buy_clock = datetime.now()
                 current_coin = self.coins['ETH']
                 price = current_coin.price(trade_pair.replace('ETH',""), qty)
-                if price > 1.01 * bid_price:
+                if price > 1.02 * bid_price:
                     print("Canceling the trade since the moment has passed and market shifted")
+                    if self.current_order['status'] in 'PARTIALLY_FILLED':
+                        partial_fill = True
+                        executd_qty = self.current_order['executedQty']
+                    else:
+                        partial_fill = False
                     if self.cancel_order(trade_pair):
+                        if partial_fill:
+                            print("Already bought {} of {}".format(executd_qty, qty))
+                            (q, p) = current_coin.sanitize(trade_pair, qty=executd_qty, price=price)
+                            self.trade_sell(trade_pair, q, p)
                         return
 
         order_price = float(self.current_order['price'])
@@ -174,7 +183,7 @@ class BinanceBot:
         else: # non-market order
             self.current_order = self.client.order_limit_sell(symbol=trade_pair,
                                                               quantity=qty,
-                                                              price=str(float(ask_price)),
+                                                              price='{:1.8f}'.format(float(ask_price)),
                                                               newOrderRespType=ORDER_RESP_TYPE_FULL)
 
         #qty = float(self.current_order['executedQty'])
@@ -702,3 +711,7 @@ if __name__ == '__main__':
     dogebot.threshold(time_between_trades = 1)
     dogebot.threshold()
     dogebot.day_trade()
+
+
+### NOTES/ TODOs ###
+# check for buy/ssell wall a bid around it
