@@ -146,12 +146,15 @@ class BinanceBot:
                         executd_qty = self.current_order['executedQty']
                     else:
                         partial_fill = False
-                    if self.cancel_order(trade_pair):
-                        if partial_fill:
-                            print("Already bought {} of {}".format(executd_qty, qty))
-                            (q, p) = current_coin.sanitize(trade_pair, qty=executd_qty, price=price)
-                            self.trade_sell(trade_pair, q, p)
-                        return
+                    try:
+                        if self.cancel_order(trade_pair):
+                            if partial_fill:
+                                print("Already bought {} of {}".format(executd_qty, qty))
+                                (q, p) = current_coin.sanitize(trade_pair, qty=float(executd_qty), price=float(price))
+                                self.trade_sell(trade_pair, q, p)
+                            return
+                    except BinanceAPIException:
+                        break
 
         order_price = float(self.current_order['price'])
         qty = float(self.current_order['executedQty'])
@@ -230,10 +233,12 @@ class BinanceBot:
         self.pp.pprint(self.balance)
         
     def cancel_order(self, sym):
-        try:
-            result = self.client.cancel_order(symbol = sym, orderId = self.current_order['orderId'])
-        except:
-            return False
+        orders = self.client.get_all_orders(symbol = sym)
+        for order in orders:
+            try:
+                result = self.client.cancel_order(symbol = sym, orderId = order['orderId'])
+            except:
+                return False
         return True
             
     def get_recent_trades(self, symbol='ETHBTC'):
