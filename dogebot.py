@@ -102,7 +102,7 @@ class BinanceBot:
         ticker = self.client.get_ticker()
         for t in ticker:
             if 'ETH' in t['symbol'][-3:]:
-                if float(t['quoteVolume']) > 25000:
+                if float(t['quoteVolume']) > 20000:
                     high_volume_coins.append(t['symbol'][:-3])
         print('Coins of Interest:')
         self.pp.pprint(high_volume_coins)
@@ -136,9 +136,13 @@ class BinanceBot:
             self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
             time.sleep(1)
             if (datetime.now()-buy_clock).total_seconds() > 60:
-                print("Canceling the trade since the moment has passed")
-                if self.cancel_order(trade_pair):
-                    return
+                buy_clock = datetime.now()
+                current_coin = self.coins[trade_pair[:-3]]
+                price = current_coin.price(trade_pair.replace('ETH',""), qty)
+                if price > 1.01 * bid_price:
+                    print("Canceling the trade since the moment has passed and market shifted")
+                    if self.cancel_order(trade_pair):
+                        return
 
         order_price = float(self.current_order['price'])
         qty = float(self.current_order['executedQty'])
@@ -195,7 +199,7 @@ class BinanceBot:
             avg_price = sum([a*b for (a,b) in list_of_sales])/sum([b for (a,b) in list_of_sales])
             order_price = avg_price
         self.current_holding = 'ETH'
-        self.current_holding_qty = self.curren_order['executedQty']*order_price
+        self.current_holding_qty = float(self.current_order['executedQty'])*order_price
         self.current_holding_value = self.current_holding_qty
         print("now holding: %s, qty: %f, value: %f"%(self.current_holding, self.current_holding_qty, self.current_holding_value))
         documentation = [datetime.now(), 
@@ -259,8 +263,12 @@ class VolatilityBot(BinanceBot):
         # check if we are holding ETH
         if self.current_holding not in 'ETH':
             # if not sell that shit
+            current_coin = self.coins[self.current_holding]
             trade_pair = self.current_holding + 'ETH'
-            self.trade_sell(trade_pair, self.current_holding_qty, self.purchase_values[trade_pair])
+            (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
+                                           qty=self.current_holding_qty,
+                                           price = self.purchase_values[trade_pair])
+            self.trade_sell(trade_pair, q, p)
 
     def threshold(self, min_price_in_eth=None, time_between_trades=None):
         if min_price_in_eth:
@@ -353,15 +361,15 @@ class VolatilityBot(BinanceBot):
                     # 10-15 mins - limit 4x
                     elif waiting.total_seconds() > 5*60 and self.impatience_level == 1:
                         print("Growing more impatient")
-                        # cancel current order
-                        self.cancel_order(current_coin.sym + 'ETH')
-                        # place new order at current_price
-                        (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
-                                                       qty=self.current_holding_qty,
-                                                       price = self.purchase_values[current_coin.sym + 'ETH'] + 4 * break_even_delta)
-                        if self.trade_sell(current_coin.sym+'ETH', q, p):
-                            self.current_holding = 'ETH'
-                            continue
+                        # # cancel current order
+                        # self.cancel_order(current_coin.sym + 'ETH')
+                        # # place new order at current_price
+                        # (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
+                        #                                qty=self.current_holding_qty,
+                        #                                price = self.purchase_values[current_coin.sym + 'ETH'] + 4 * break_even_delta)
+                        # if self.trade_sell(current_coin.sym+'ETH', q, p):
+                        #     self.current_holding = 'ETH'
+                        #     continue
                         self.impatience_level = 2
                     # 15-20 mins - limit 3x
                     elif waiting.total_seconds() > 10*60 and self.impatience_level == 2:
@@ -375,33 +383,34 @@ class VolatilityBot(BinanceBot):
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
-                            self.impatience_level = 3
+                        self.impatience_level = 3
                     # 20-25 min - limit 2x
                     elif waiting.total_seconds() > 15*60 and self.impatience_level == 3:
                         print("Growing more impatient")
-                        # cancel current order
-                        if self.cancel_order(current_coin.sym + 'ETH'):
-                            # place new order at current_price
-                            (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
-                                                           qty=self.current_holding_qty,
-                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + 2 * break_even_delta)
-                            if self.trade_sell(current_coin.sym+'ETH', q, p):
-                                self.current_holding = 'ETH'
-                                continue
-                            self.impatience_level = 4
+                        # # cancel current order
+                        # if self.cancel_order(current_coin.sym + 'ETH'):
+                        #     # place new order at current_price
+                        #     (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
+                        #                                    qty=self.current_holding_qty,
+                        #                                    price = self.purchase_values[current_coin.sym + 'ETH'] + 2 * break_even_delta)
+                        #     if self.trade_sell(current_coin.sym+'ETH', q, p):
+                        #         self.current_holding = 'ETH'
+                        #         continue
+                        self.impatience_level = 4
                     # 25 min + - limit 1x (let's just get our money back on this one)
-                    else:
+                    elif self.impatience_level == 4:
                         print("Fully impatient")
                         # cancel current order
                         if self.cancel_order(current_coin.sym + 'ETH'):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                            qty=self.current_holding_qty,
-                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + break_even_delta)
+                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + break_even_delta * 1.5)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
-                            self.impatience_level = 5
+                        self.impatience_level = 5
+
                     # OR if we are greater than 1.1x AND market looks negative
                     (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                    qty=self.current_holding_qty,
@@ -458,6 +467,7 @@ class VolatilityBot(BinanceBot):
                             for s in self.current_values.keys():
                                 self.purchase_values[s] = self.current_values[s]
                             print("Price: %f"%self.current_values[best_trade])
+                            print(q, p)
                             self.trade_buy(best_trade, q, p)
                             self.impatience_level = 0
                             self.t0 = datetime.now()
@@ -529,13 +539,17 @@ class Coin:
         # elif price and price < self.min_price:
             # price = self.min_price
         if qty:
+            full_resolution_qty = qty
             precision = len(str(int(1/self.increment[sym])))-1
-            qty = float("{0:1.{1:}}".format(qty, precision))
+            qty = float("{0:1.{1:}f}".format(qty, precision))
+            if qty > full_resolution_qty:
+                # when truncating to 0 decimals this rounds for some reason so we need to fix that
+                qty = qty - 1
             # qty = float(int(qty/self.increment[sym])*self.increment[sym])
 
         if price is not None:
             precision = len(str(int(1/self.tick[sym])))-1
-            price = float("{0:1.{1:}}".format(price, precision))
+            price = float("{0:1.{1:}f}".format(price, precision))
             # price = float(int(price/self.tick[sym])*self.tick[sym])
             if qty is not None:
                 return (qty, price)
