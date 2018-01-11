@@ -102,7 +102,7 @@ class BinanceBot:
         ticker = self.client.get_ticker()
         for t in ticker:
             if 'ETH' in t['symbol'][-3:]:
-                if float(t['quoteVolume']) > 20000:
+                if float(t['quoteVolume']) > 25000:
                     high_volume_coins.append(t['symbol'][:-3])
         print('Coins of Interest:')
         self.pp.pprint(high_volume_coins)
@@ -137,7 +137,7 @@ class BinanceBot:
             time.sleep(1)
             if (datetime.now()-buy_clock).total_seconds() > 60:
                 buy_clock = datetime.now()
-                current_coin = self.coins[trade_pair[:-3]]
+                current_coin = self.coins['ETH']
                 price = current_coin.price(trade_pair.replace('ETH',""), qty)
                 if price > 1.01 * bid_price:
                     print("Canceling the trade since the moment has passed and market shifted")
@@ -330,6 +330,8 @@ class VolatilityBot(BinanceBot):
         return allowed_pairs
     
     def day_trade(self):
+        self.update_values('ETH')
+        time.sleep(2)
         while(self.current_holding_value > 0.8):
             try:
                 self.ETHUSD = self.coins['ETH'].usd_value
