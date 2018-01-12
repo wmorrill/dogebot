@@ -82,6 +82,8 @@ class BinanceBot:
         for coin in self.coins_of_interest:
             self.coins[coin] = Coin(client=self.client, symbol=coin)
             self.coins['ETH'].add_pair(coin)
+        self.starting_value = self.get_balance()
+        self.current_holding_value = self.starting_value
 
     def go_live(self):
         self.test = False
@@ -129,7 +131,10 @@ class BinanceBot:
                                                              newOrderRespType=ORDER_RESP_TYPE_FULL)
         time.sleep(5)
         orders =  self.client.get_open_orders(symbol = trade_pair)
-        self.pp.pprint(orders)
+        # self.pp.pprint(orders)
+        if len(orders) < 1:
+            print("Order didn't go through, try again")
+            return self.trade_buy(trade_pair, qty, bid_price)
         self.current_order = orders[-1]
         # let's make sure this works before moving on
         buy_clock = datetime.now()
@@ -154,6 +159,8 @@ class BinanceBot:
                                 print("Already bought {} of {}".format(executd_qty, qty))
                                 (q, p) = current_coin.sanitize(trade_pair, qty=float(executd_qty), price=float(price))
                                 self.trade_sell(trade_pair, q, p)
+                                while self.get_order_status(trade_pair):
+                                    print("Waiting for amputee to sell...", end='\r')
                             return
                     except BinanceAPIException:
                         break
@@ -199,11 +206,11 @@ class BinanceBot:
 
     def get_order_status(self, trade_pair):
         orders = self.client.get_open_orders(symbol = trade_pair)
-        self.current_order = orders[-1]
-        # TODO this might be wrong if there is more than one open order of the same trade pair
-        if(self.current_order['status'] not in "FILLED"): 
+        if len(orders) > 0:
+            #still open orders
             return False
-        else:    
+        else:
+            # nothing open
             self.settle_sell(trade_pair)
             return True
         
@@ -216,7 +223,7 @@ class BinanceBot:
             order_price = avg_price
         self.current_holding = 'ETH'
         self.current_holding_qty = float(self.current_order['executedQty'])*order_price
-        self.current_holding_value = self.current_holding_qty
+        self.current_holding_value = self.get_balance()
         print("now holding: %s, qty: %f, value: %f"%(self.current_holding, self.current_holding_qty, self.current_holding_value))
         documentation = [datetime.now(), 
                          self.current_holding, 
@@ -230,11 +237,16 @@ class BinanceBot:
         self.document_transaction(documentation)
         
     def get_balance(self):
-        unique_coins = set(list(chain.from_iterable(self.pairs_of_interest)))
-        for coin in unique_coins:
-            self.balance[coin] = self.client.get_asset_balance(asset=coin)
-        print("current Holdings")
-        self.pp.pprint(self.balance)
+        balance = 0
+        print("=====================================")
+        for coin in self.coins:
+            self.coins[coin].update_value()
+            print(self.coins[coin])
+            balance += self.coins[coin].eth_value
+        print("-------------------------------------")
+        print("current Holdings: {:1.4f} ETH".format(balance))
+        print("=====================================")
+        return balance
         
     def cancel_order(self, sym):
         orders = self.client.get_open_orders(symbol = sym)
@@ -352,7 +364,7 @@ class VolatilityBot(BinanceBot):
     def day_trade(self):
         self.update_values('ETH')
         time.sleep(2)
-        while(self.current_holding_value > 0.8):
+        while(self.current_holding_value > self.starting_value*0.9):
             try:
                 self.ETHUSD = self.coins['ETH'].usd_value
                 # what are we holding?
@@ -545,7 +557,7 @@ class Coin:
         self.update_value()
         
     def __str__(self):
-        return "{0:}: qty:{1:.6f} ETH value:{2:6f}".format(self.sym, self.balance, self.eth_value)
+        return "{0:}: qty:{1:.6f} Value(ETH):{2:6f}".format(self.sym, self.balance, self.eth_value)
         
     def sanitize(self, sym, qty=None, price=None):
         if not sym or len(sym) < 5:
@@ -687,16 +699,17 @@ class Coin:
     def avg_gap(self):
         return 100 * sum(self.gap)/len(self.gap)
     
-    def price(self, symbol, base_value):
+    def price(self, symbol, base_value=None):
         self.update_books(symbol)
-        
+        if base_value is None:
+            base_value = 1
         if self.is_base:
             #then we want to buy
-            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]
+            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]  # was 'asks'
             quantity = base_value/trades[0][0]
         else:
             # then we want to sell
-            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
+            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'bids'
             quantity = base_value/trades[0][0]
         sum = 0
         count = 0
@@ -709,7 +722,7 @@ class Coin:
                 # print("%s expect %d trades @ price: %f" %(symbol, count, i[0]))
                 # print(count, i[0])
                 # print(trades)
-                return self.sanitize(self.pair(symbol), price=trades[count+1][0])
+                return self.sanitize(self.pair(symbol), price=trades[count][0])
         return trades[-1][0]
             
 
