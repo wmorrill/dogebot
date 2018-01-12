@@ -135,7 +135,7 @@ class BinanceBot:
             print("Waiting for order to fill...", end="\r")
             self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
             time.sleep(1)
-            if (datetime.now()-buy_clock).total_seconds() > 6:
+            if (datetime.now()-buy_clock).total_seconds() > 60:
                 buy_clock = datetime.now()
                 current_coin = self.coins['ETH']
                 price = current_coin.price(trade_pair.replace('ETH',""), qty)
@@ -237,8 +237,8 @@ class BinanceBot:
         
     def cancel_order(self, sym):
         orders = self.client.get_all_orders(symbol = sym)
-        print("Orders:")
-        print(orders)
+        # print("Orders:")
+        # print(orders)
         for order in orders:
             if order['status'] in 'NEW':
                 try:
