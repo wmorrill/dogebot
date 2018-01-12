@@ -135,12 +135,11 @@ class BinanceBot:
             print("Waiting for order to fill...", end="\r")
             self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
             time.sleep(1)
-            if (datetime.now()-buy_clock).total_seconds() > 60:
+            if (datetime.now()-buy_clock).total_seconds() > 6:
                 buy_clock = datetime.now()
                 current_coin = self.coins['ETH']
                 price = current_coin.price(trade_pair.replace('ETH',""), qty)
                 if price > 1.02 * bid_price:
-                    print("Canceling the trade since the moment has passed and market shifted")
                     if self.current_order['status'] in 'PARTIALLY_FILLED':
                         partial_fill = True
                         executd_qty = self.current_order['executedQty']
@@ -148,6 +147,7 @@ class BinanceBot:
                         partial_fill = False
                     try:
                         if self.cancel_order(trade_pair):
+                            print("Canceling the trade since the moment has passed and market shifted")
                             if partial_fill:
                                 print("Already bought {} of {}".format(executd_qty, qty))
                                 (q, p) = current_coin.sanitize(trade_pair, qty=float(executd_qty), price=float(price))
@@ -196,7 +196,10 @@ class BinanceBot:
         return self.get_order_status(trade_pair)
 
     def get_order_status(self, trade_pair):
-        self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderId'])
+        orders = self.client.get_all_orders(symbol = trade_pair)
+        orders = [x for x in orders if x['status'] in 'NEW']
+        self.current_order = self.client.get_order(symbol=trade_pair, orderId=orders[0]['orderId'])
+        # TODO this might be wrong if there is more than one open order of the same trade pair
         if(self.current_order['status'] not in "FILLED"): 
             return False
         else:    
@@ -234,11 +237,14 @@ class BinanceBot:
         
     def cancel_order(self, sym):
         orders = self.client.get_all_orders(symbol = sym)
+        print("Orders:")
+        print(orders)
         for order in orders:
-            try:
-                result = self.client.cancel_order(symbol = sym, orderId = order['orderId'])
-            except:
-                return False
+            if order['status'] in 'NEW':
+                try:
+                    result = self.client.cancel_order(symbol = sym, orderId = order['orderId'])
+                except:
+                    return False
         return True
             
     def get_recent_trades(self, symbol='ETHBTC'):
