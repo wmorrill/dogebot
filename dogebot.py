@@ -127,13 +127,14 @@ class BinanceBot:
                                                              quantity=qty,
                                                              price='{:1.8f}'.format(float(bid_price)),
                                                              newOrderRespType=ORDER_RESP_TYPE_FULL)
-        orderID = self.current_order['orderId']
-
+        orders =  self.client.get_all_orders(trade_pair)
+        orders = [x for x in orders if x['status'] in 'NEW']
+        self.current_order = orders[-1]
         # let's make sure this works before moving on
         buy_clock = datetime.now()
         while(self.current_order['status'] not in "FILLED"):
             print("Waiting for order to fill...", end="\r")
-            self.current_order = self.client.get_order(symbol=trade_pair, orderId=orderID)
+            self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderId'])
             time.sleep(1)
             if (datetime.now()-buy_clock).total_seconds() > 60:
                 buy_clock = datetime.now()
