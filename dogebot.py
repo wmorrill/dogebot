@@ -127,7 +127,7 @@ class BinanceBot:
                                                              quantity=qty,
                                                              price='{:1.8f}'.format(float(bid_price)),
                                                              newOrderRespType=ORDER_RESP_TYPE_FULL)
-        orders =  self.client.get_all_orders(trade_pair)
+        orders =  self.client.get_all_orders(symbol = trade_pair)
         orders = [x for x in orders if x['status'] in 'NEW']
         self.current_order = orders[-1]
         # let's make sure this works before moving on
@@ -199,7 +199,7 @@ class BinanceBot:
     def get_order_status(self, trade_pair):
         orders = self.client.get_all_orders(symbol = trade_pair)
         orders = [x for x in orders if x['status'] in 'NEW']
-        self.current_order = self.client.get_order(symbol=trade_pair, orderId=orders[0]['orderId'])
+        self.current_order = orders[-1]
         # TODO this might be wrong if there is more than one open order of the same trade pair
         if(self.current_order['status'] not in "FILLED"): 
             return False
