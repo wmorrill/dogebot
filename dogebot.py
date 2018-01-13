@@ -130,14 +130,19 @@ class BinanceBot:
                                                              price='{:1.8f}'.format(float(bid_price)),
                                                              newOrderRespType=ORDER_RESP_TYPE_FULL)
         time.sleep(5)
-        orders =  self.client.get_open_orders(symbol = trade_pair)
+        open_orders =  self.client.get_open_orders(symbol = trade_pair)
         # self.pp.pprint(orders)
-        if len(orders) < 1:
-            print("Order didn't go through, try again")
-            return self.trade_buy(trade_pair, qty, bid_price)
-        self.current_order = orders[-1]
+        if len(open_orders) < 1:
+            try:
+                self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderId'])
+            except BinanceAPIException:
+                print("Order didn't go through, try again")
+                return self.trade_buy(trade_pair, qty, bid_price)
+        else:
+            self.current_order = open_orders[-1]
         # let's make sure this works before moving on
         buy_clock = datetime.now()
+        double_check = False
         while(self.current_order['status'] not in "FILLED"):
             print("Waiting for order to fill...", end="\r")
             self.current_order = self.client.get_order(symbol=trade_pair, orderId=self.current_order['orderId'])
@@ -150,6 +155,10 @@ class BinanceBot:
                     if self.current_order['status'] in 'PARTIALLY_FILLED':
                         partial_fill = True
                         executd_qty = self.current_order['executedQty']
+                        if not double_check:
+                            buy_clock = datetime.now()
+                            double_check = True
+                            continue
                     else:
                         partial_fill = False
                     try:
@@ -158,7 +167,7 @@ class BinanceBot:
                             if partial_fill:
                                 print("Already bought {} of {}".format(executd_qty, qty))
                                 (q, p) = current_coin.sanitize(trade_pair, qty=float(executd_qty), price=float(price))
-                                self.trade_sell(trade_pair, q, p)
+                                self.trade_sell(trade_pair, q)   # market sell so it actully happens
                                 while self.get_order_status(trade_pair):
                                     print("Waiting for amputee to sell...", end='\r')
                             return
@@ -364,7 +373,7 @@ class VolatilityBot(BinanceBot):
     def day_trade(self):
         self.update_values('ETH')
         time.sleep(2)
-        while(self.current_holding_value > self.starting_value*0.9):
+        while(self.current_holding_value > self.starting_value*0.8):
             try:
                 self.ETHUSD = self.coins['ETH'].usd_value
                 # what are we holding?
@@ -481,7 +490,7 @@ class VolatilityBot(BinanceBot):
                         min_trade_threshold = self.minimum_trade_value
                         self.current_holding_qty = self.max_trade_value/self.current_values[best_trade]
                     else:
-                        min_trade_threshold = max(self.minimum_trade_value, current_coin.increment[best_trade] * current_coin.eth_value / current_coin.balance)
+                        min_trade_threshold = max(self.minimum_trade_value, current_coin.eth_value / current_coin.balance)
                         self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
                     print("pair:{0:} price:{1:1.6f} delta: {2:1.6f} value increase:{3:1.6f} threshold:{4:1.6f} gap:{5:1.2f}% bid/ask:{6:1.2f}".format(
                                 best_trade, 
@@ -503,6 +512,7 @@ class VolatilityBot(BinanceBot):
                             print("Price: %f"%self.current_values[best_trade])
                             print(q, p)
                             self.trade_buy(best_trade, q, p)
+                            # self.trade_buy(best_trade, q) # let's try buying at market price
                             self.impatience_level = 0
                             self.t0 = datetime.now()
 
@@ -575,10 +585,12 @@ class Coin:
         if qty:
             full_resolution_qty = qty
             precision = len(str(int(1/self.increment[sym])))-1
-            qty = float("{0:1.{1:}f}".format(qty, precision))
-            if qty > full_resolution_qty:
-                # when truncating to 0 decimals this rounds for some reason so we need to fix that
-                qty = qty - 1
+            # qty = float("{0:1.{1:}f}".format(qty, precision))
+            split_str = str(qty).split(".")
+            qty = float(".".join(split_str[0],split_str[1][:precision]))
+            # if qty > full_resolution_qty:
+            #     # when truncating to 0 decimals this rounds for some reason so we need to fix that
+            #     qty = qty - 1
             # qty = float(int(qty/self.increment[sym])*self.increment[sym])
 
         if price is not None:
@@ -612,7 +624,8 @@ class Coin:
         self.books[symbol]['updated'] = datetime.now()-timedelta(days=1)
     
     def update_balance(self):
-        self.balance = float(self.client.get_asset_balance(asset=self.sym)['free'])
+        self.balance = (float(self.client.get_asset_balance(asset=self.sym)['free']) +
+                    float(self.client.get_asset_balance(asset=self.sym)['locked']))
     
     def update_books(self, symbol=None):
         #print("updating books for %s"%symbol)
@@ -705,11 +718,13 @@ class Coin:
             base_value = 1
         if self.is_base:
             #then we want to buy
-            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]  # was 'asks'
+            # trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]  # was 'asks'
+            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'asks'
             quantity = base_value/trades[0][0]
         else:
             # then we want to sell
-            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'bids'
+            # trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'bids'
+            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
             quantity = base_value/trades[0][0]
         sum = 0
         count = 0
@@ -718,7 +733,7 @@ class Coin:
         for i in trades[:-1]:
             sum += i[1]
             count += 1
-            if sum >= quantity*2:
+            if sum >= quantity *1.5:
                 # print("%s expect %d trades @ price: %f" %(symbol, count, i[0]))
                 # print(count, i[0])
                 # print(trades)
