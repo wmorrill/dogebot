@@ -508,7 +508,7 @@ class VolatilityBot(BinanceBot):
                             time.sleep(1)
                             # check how mny of these we still have
                             quantity = current_coin.get_available_balance()
-                            q = current_coin.sanitize(qty=quantity)
+                            q = current_coin.sanitize('ETH', qty=quantity)
                             # place new order at current_price
                             if self.trade_sell(current_coin.sym+'ETH', q):
                                 self.current_holding = 'ETH'
