@@ -11,51 +11,64 @@ import os
 import json
 import collections
 import atexit
+import requests
+from retrypy import retry
 
 class ExceptionRetry(object):
     def __init__(self, arg):
         self.arg = arg
     def __call__(self, *args, **kwargs):
         for i in range(3):
+            print("try {}".format(i))
             try:
                 return self.arg(*args, **kwargs)
-            except BinanceAPIException as err:
+            except (BinanceAPIException, requests.exceptions.ReadTimeout) as err:
                 print("API Error[{}], retrying...".format(err))
                 time.sleep()
         return False
 
-@ExceptionRetry
+
 class ErrorSafeClient(Client):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    @retry.decorate(times=2)
     def get_exchange_info(self, **params):
         return super().get_exchange_info(**params)
 
+    @retry.decorate(times=2)
     def order_market_buy(self, **params):
         return super().order_market_buy(**params)
 
+    @retry.decorate(times=2)
     def order_market_sell(self, **params):
         return super().order_market_sell(**params)
 
+    @retry.decorate(times=2)
     def order_limit_buy(self, timeInForce=TIME_IN_FORCE_GTC, **params):
         return super().order_limit_buy(timeInForce=timeInForce, **params)
 
+    @retry.decorate(times=2)
     def order_limit_sell(self, timeInForce=TIME_IN_FORCE_GTC, **params):
         return super().order_limit_sell(timeInForce=timeInForce, **params)
 
+    @retry.decorate(times=2)
     def get_order(self, **params):
         return super().get_order(**params)
 
+    @retry.decorate(times=2)
     def get_asset_balance(self, **params):
         return super().get_asset_balance(**params)
 
+    @retry.decorate(times=2)
     def get_recent_trades(self, **params):
         return super().get_recent_trades(**params)
 
+    @retry.decorate(times=2)
     def cancel_order(self, **params):
         return super().cancel_order(**params)
 
+    @retry.decorate(times=2)
     def get_order_book(self, **params):
         return super().get_order_book(**params)
 
@@ -208,7 +221,10 @@ class BinanceBot:
                                                               newOrderRespType=ORDER_RESP_TYPE_FULL)
 
         #qty = float(self.current_order['executedQty'])
-        print("SELL:%s \tPlacing a sell limit - qty: %d price: %f"%(trade_pair, qty, ask_price))
+        if ask_price is None:
+            print("SELL:%s \tPlacing a market sell - qty: %d"%(trade_pair, qty))
+        else:
+            print("SELL:%s \tPlacing a sell limit - qty: %d price: %f"%(trade_pair, qty, ask_price))
         time.sleep(1)
         # let's see if this settled immediately
         return self.get_order_status(trade_pair)
@@ -373,7 +389,7 @@ class VolatilityBot(BinanceBot):
     def day_trade(self):
         self.update_values('ETH')
         time.sleep(2)
-        while(self.current_holding_value > self.starting_value*0.8):
+        while(self.current_holding_value > self.starting_value*0.9):
             try:
                 self.ETHUSD = self.coins['ETH'].usd_value
                 # what are we holding?
@@ -448,7 +464,7 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                            qty=self.current_holding_qty,
-                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + break_even_delta * 1.5)
+                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + break_even_delta )
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
@@ -463,11 +479,15 @@ class VolatilityBot(BinanceBot):
                         (bid_depth, ask_depth) = current_coin.order_depth('ETH', self.current_holding_qty, False)
                         if ask_depth >= bid_depth:
                             # cancel current order
-                            if self.cancel_order(current_coin.sym + 'ETH'):
-                                # place new order at current_price
-                                if self.trade_sell(current_coin.sym+'ETH', q, p):
-                                    self.current_holding = 'ETH'
-                                    continue
+                            self.cancel_order(current_coin.sym + 'ETH')
+                            time.sleep(1)
+                            # check how mny of these we still have
+                            quantity = current_coin.get_available_balance()
+                            q = current_coin.sanitize(quantity=quantity)
+                            # place new order at current_price
+                            if self.trade_sell(current_coin.sym+'ETH', q):
+                                self.current_holding = 'ETH'
+                                continue
                             
                 else:
                     # get conservative estimated value for each trade
@@ -501,6 +521,7 @@ class VolatilityBot(BinanceBot):
                                 current_coin.avg_gap(),
                                 depth_dict[best_trade]), 
                                 end="\r")
+
                     if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
                         # check the order depth for expected market direction
                         if current_coin.avg_gap() < 0.5 and depth_dict[best_trade] > 1.5:
@@ -519,6 +540,7 @@ class VolatilityBot(BinanceBot):
             except json.decoder.JSONDecodeError:
                 print("JSON Error...")
             time.sleep(0.1)
+        print(self.current_holding_value, self.starting_value)
         
         
 class Coin:
@@ -587,7 +609,7 @@ class Coin:
             precision = len(str(int(1/self.increment[sym])))-1
             # qty = float("{0:1.{1:}f}".format(qty, precision))
             split_str = str(qty).split(".")
-            qty = float(".".join(split_str[0],split_str[1][:precision]))
+            qty = float(".".join([split_str[0],split_str[1][:precision]]))
             # if qty > full_resolution_qty:
             #     # when truncating to 0 decimals this rounds for some reason so we need to fix that
             #     qty = qty - 1
@@ -626,6 +648,9 @@ class Coin:
     def update_balance(self):
         self.balance = (float(self.client.get_asset_balance(asset=self.sym)['free']) +
                     float(self.client.get_asset_balance(asset=self.sym)['locked']))
+
+    def get_available_balance(self):
+        return float(self.client.get_asset_balance(asset=self.sym)['free'])
     
     def update_books(self, symbol=None):
         #print("updating books for %s"%symbol)
