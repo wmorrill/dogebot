@@ -97,6 +97,7 @@ class BinanceBot:
             self.coins['ETH'].add_pair(coin)
         self.starting_value = self.get_balance()
         self.current_holding_value = self.starting_value
+        self.start_time = datetime.now()
 
     def go_live(self):
         self.test = False
@@ -303,8 +304,13 @@ class MarketDepthBot(BinanceBot):
     
     
 class VolatilityBot(BinanceBot):
-    def __init__(self, api_key, api_secret):
+    def __init__(self, api_key, api_secret, twilio_acc=None, twilio_key=None):
         super().__init__(api_key, api_secret)
+        if twilio_acc and twilio_key:
+            self.setup_twilio(twilio_acc, twilio_key)
+            self.twilio = True
+        else:
+            self.twilio = False
         atexit.register(self.exit)
         self.purchase_values = {}
         self.current_values = {}
@@ -325,7 +331,26 @@ class VolatilityBot(BinanceBot):
             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                            qty=self.current_holding_qty,
                                            price = self.purchase_values[trade_pair])
-            self.trade_sell(trade_pair, q, p)
+            try:
+                self.trade_sell(trade_pair, q, p)
+            except:
+                print("exit sell failed for soome reason")
+
+        if self.twilio:
+            dT =datetime.now() - self.start_time
+            value = self.current_holding_value
+            dV = value - self.starting_value
+            message = self.tw_client.api.account.messages.create(
+                        to="+12035121109",
+                        from_="+19143525141",
+                        body="Binance Script Ended! Runtime:{} Value: {}, Delta{}".format(dT, value, dV))
+
+    def setup_twilio(self, acc, key):
+        from twilio.rest import Client as tw_client
+
+        # Find these values at https://twilio.com/user/account
+        self.tw_client = tw_client(acc, key)
+
 
     def threshold(self, min_price_in_eth=None, time_between_trades=None):
         if min_price_in_eth:
@@ -483,7 +508,7 @@ class VolatilityBot(BinanceBot):
                             time.sleep(1)
                             # check how mny of these we still have
                             quantity = current_coin.get_available_balance()
-                            q = current_coin.sanitize(quantity=quantity)
+                            q = current_coin.sanitize(qty=quantity)
                             # place new order at current_price
                             if self.trade_sell(current_coin.sym+'ETH', q):
                                 self.current_holding = 'ETH'
