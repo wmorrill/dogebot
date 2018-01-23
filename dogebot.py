@@ -38,18 +38,22 @@ class ErrorSafeClient(Client):
 
     @retry.decorate(times=2)
     def order_market_buy(self, **params):
+        params['recvWindow']=10000
         return super().order_market_buy(**params)
 
     @retry.decorate(times=2)
     def order_market_sell(self, **params):
+        params['recvWindow']=10000
         return super().order_market_sell(**params)
 
     @retry.decorate(times=2)
     def order_limit_buy(self, timeInForce=TIME_IN_FORCE_GTC, **params):
+        params['recvWindow']=10000
         return super().order_limit_buy(timeInForce=timeInForce, **params)
 
     @retry.decorate(times=2)
     def order_limit_sell(self, timeInForce=TIME_IN_FORCE_GTC, **params):
+        params['recvWindow']=10000
         return super().order_limit_sell(timeInForce=timeInForce, **params)
 
     @retry.decorate(times=2)
@@ -58,6 +62,7 @@ class ErrorSafeClient(Client):
 
     @retry.decorate(times=2)
     def get_asset_balance(self, **params):
+        params['recvWindow']=10000
         return super().get_asset_balance(**params)
 
     @retry.decorate(times=2)
@@ -66,11 +71,17 @@ class ErrorSafeClient(Client):
 
     @retry.decorate(times=2)
     def cancel_order(self, **params):
+        params['recvWindow']=10000
         return super().cancel_order(**params)
 
     @retry.decorate(times=2)
     def get_order_book(self, **params):
         return super().get_order_book(**params)
+
+    @retry.decorate(times=2)
+    def get_open_orders(self, **params):
+        params['recvWindow']=10000
+        return super().get_open_orders(**params)
 
 
 class BinanceBot:
@@ -118,7 +129,7 @@ class BinanceBot:
         ticker = self.client.get_ticker()
         for t in ticker:
             if 'ETH' in t['symbol'][-3:]:
-                if float(t['quoteVolume']) > 25000:
+                if float(t['quoteVolume']) > 10000:
                     high_volume_coins.append(t['symbol'][:-3])
         print('Coins of Interest:')
         self.pp.pprint(high_volume_coins)
@@ -298,10 +309,24 @@ class BinanceBot:
         self.pp.pprint(recent_trades['asks'][:10])
         
         
-class MarketDepthBot(BinanceBot):
+class ManipulationBot(BinanceBot):
     def __init__(self, api_key, api_secret):
         super().__init__(api_key, api_secret)
-    
+
+class LoggingBot(BinanceBot):
+    def __init__(self, api_key, api_secret):
+        super().__init__(api_key, api_secret)
+
+    def get_market_info(self):
+        for each_coin in self.coins_of_interest:
+            # get historical buys/sells
+            pass
+
+        # get current bids/asks
+
+
+        # save it somewhere
+
     
 class VolatilityBot(BinanceBot):
     def __init__(self, api_key, api_secret, twilio_acc=None, twilio_key=None):
@@ -373,7 +398,10 @@ class VolatilityBot(BinanceBot):
         
     def trade_sell(self, trade_pair, quantity, price=None):
         print("Time: %s\t Value: %f Total Fees: %f"%(datetime.now(), self.current_holding_value, self.total_fees))
-        print("Sell: %s x %f @ %s"%(trade_pair, quantity, str(price)))
+        if price:
+            print("Sell: %s x %f @ %s"%(trade_pair, quantity, str(price)))
+        else:
+            print("Market Sell: {} x {}".format(trade_pair, quantity))
         if self.test:
             self.current_holding = 'ETH'
             self.current_holding_qty = quantity * price
@@ -414,7 +442,7 @@ class VolatilityBot(BinanceBot):
     def day_trade(self):
         self.update_values('ETH')
         time.sleep(2)
-        while(self.current_holding_value > self.starting_value*0.9):
+        while(self.current_holding_value >= self.starting_value):
             try:
                 self.ETHUSD = self.coins['ETH'].usd_value
                 # what are we holding?
@@ -435,13 +463,13 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                        qty=self.current_holding_qty,
-                                                       price = self.purchase_values[current_coin.sym + 'ETH'] + 5 * break_even_delta)
+                                                       price = self.purchase_values[current_coin.sym + 'ETH'] + 3 * break_even_delta)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
                             self.impatience_level = 1
-                        else:
-                            time.sleep(1)
+                        # else:
+                        #     time.sleep(1)
                     # 10-15 mins - limit 4x
                     elif waiting.total_seconds() > 5*60 and self.impatience_level == 1:
                         print("Growing more impatient")
@@ -463,7 +491,7 @@ class VolatilityBot(BinanceBot):
                             # place new order at current_price
                             (q, p) = current_coin.sanitize(current_coin.sym + 'ETH',
                                                            qty=self.current_holding_qty,
-                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + 3 * break_even_delta)
+                                                           price = self.purchase_values[current_coin.sym + 'ETH'] + 2 * break_even_delta)
                             if self.trade_sell(current_coin.sym+'ETH', q, p):
                                 self.current_holding = 'ETH'
                                 continue
@@ -508,11 +536,32 @@ class VolatilityBot(BinanceBot):
                             time.sleep(1)
                             # check how mny of these we still have
                             quantity = current_coin.get_available_balance()
-                            q = current_coin.sanitize('ETH', qty=quantity)
-                            # place new order at current_price
-                            if self.trade_sell(current_coin.sym+'ETH', q):
+                            if quantity and quantity > 1:
+                                q = current_coin.sanitize(current_coin.sym +'ETH', qty=quantity)
+                                # place new order at current_price
+                                if self.trade_sell(current_coin.sym+'ETH', q, current_price):
+                                    self.current_holding = 'ETH'
+                                    continue
+                                else:
+                                    while not self.get_order_status(current_coin.sym+'ETH'):
+                                        print("waiting for an early sell to execute", end='\r')
+                                        time.sleep(1)#may get stuck here and never sell
+                                    self.current_holding = 'ETH'
+                            else:
                                 self.current_holding = 'ETH'
-                                continue
+                    # elif self.impatience_level > 1 and current_price < self.purchase_values[current_coin.sym+'ETH'] - break_even_delta * 2:
+                    #     #panic sell because value has dropped too much
+                    #     print('-------Cut your losses :/-------')
+                    #     self.cancel_order(current_coin.sym + 'ETH')
+                    #     time.sleep(1)
+                    #     # check how mny of these we still have
+                    #     quantity = current_coin.get_available_balance()
+                    #     if quantity and quantity > 1:
+                    #         q = current_coin.sanitize(current_coin.sym +'ETH', qty=quantity)
+                    #         # place new order at current_price
+                    #         if self.trade_sell(current_coin.sym+'ETH', q):
+                    #             self.current_holding = 'ETH'
+                    #             continue
                             
                 else:
                     # get conservative estimated value for each trade
@@ -537,17 +586,18 @@ class VolatilityBot(BinanceBot):
                     else:
                         min_trade_threshold = max(self.minimum_trade_value, current_coin.eth_value / current_coin.balance)
                         self.current_holding_qty = min(self.max_trade_value/self.current_values[best_trade], current_coin.balance/self.current_values[best_trade])
-                    print("pair:{0:} price:{1:1.6f} delta: {2:1.6f} value increase:{3:1.6f} threshold:{4:1.6f} gap:{5:1.2f}% bid/ask:{6:1.2f}".format(
+                    print("pair:{0:} price:{1:1.6f} Moving Avg: {2:1.6f} value increase:{3:1.6f} threshold:{4:1.6f} gap:{5:1.2f}% bid/ask:{6:1.2f}".format(
                                 best_trade, 
                                 self.current_values[best_trade],
-                                self.deltas[best_trade],
+                                current_coin.moving_avg[best_trade.replace('ETH', '')],
                                 abs(self.deltas[best_trade]*self.current_holding_value),
                                 min_trade_threshold,
                                 current_coin.avg_gap(),
                                 depth_dict[best_trade]), 
                                 end="\r")
 
-                    if abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value:
+                    if (abs(self.deltas[best_trade]*self.current_holding_value) > self.minimum_trade_value
+                        and current_coin.moving_avg[best_trade.replace('ETH', '')] > self.current_values[best_trade]):
                         # check the order depth for expected market direction
                         if current_coin.avg_gap() < 0.5 and depth_dict[best_trade] > 1.5:
                             # if the bid depth is 20% higher than ask, market should soon trend up, so its okay to buy
@@ -585,6 +635,7 @@ class Coin:
         self.books = {}
         self.pairs = []
         self.balance = 0
+        self.moving_avg = {}
         self.gap = collections.deque(5*[0], 5)
         # decide if this is a base pair
         if 'ETH' in self.sym or 'BTC' in self.sym:
@@ -696,11 +747,16 @@ class Coin:
             self.books[symbol]['bids'] = temp_dict['bids']
             self.books[symbol]['asks'] = temp_dict['asks']
             self.gap.appendleft(abs(float(self.books[symbol]['bids'][0][0]) - float(self.books[symbol]['asks'][0][0]))/float(self.books[symbol]['asks'][0][0]))
+            hist_dict = self.client.get_historical_trades(symbol=self.pair(symbol))
+            cost_list = [float(x['price'])*float(x['qty']) for x in hist_dict]
+            total_qty = sum([float(x['qty']) for x in hist_dict])
+            #print(self.sym, symbol, len(cost_list), total_qty, sum(cost_list)/total_qty)
+            self.moving_avg[symbol] = sum(cost_list)/total_qty
 
     def order_depth(self, sym, qty, buy_bool=True):
         self.update_books()
         # return bid and ask depth
-        analysis_depth = qty * 30
+        analysis_depth = qty * 20
         bids = [[float(x), float(y)] for [x, y, z] in self.books[sym]['bids']]
         asks = [[float(x), float(y)] for [x, y, z] in self.books[sym]['asks']]
         
@@ -768,13 +824,13 @@ class Coin:
             base_value = 1
         if self.is_base:
             #then we want to buy
-            # trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]  # was 'asks'
-            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'asks'
+            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]  # was 'asks'
+            # trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'asks'
             quantity = base_value/trades[0][0]
         else:
             # then we want to sell
-            # trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'bids'
-            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
+            trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['asks']]  # was 'bids'
+            #trades = [[float(x), float(y)] for [x, y, z] in self.books[symbol]['bids']]
             quantity = base_value/trades[0][0]
         sum = 0
         count = 0
@@ -783,7 +839,7 @@ class Coin:
         for i in trades[:-1]:
             sum += i[1]
             count += 1
-            if sum >= quantity *1.5:
+            if sum >= quantity:# *1.5:
                 # print("%s expect %d trades @ price: %f" %(symbol, count, i[0]))
                 # print(count, i[0])
                 # print(trades)
